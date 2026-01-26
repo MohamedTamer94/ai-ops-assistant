@@ -36,13 +36,14 @@ The system is designed around:
 
 ## Project Structure
 
+```
 ai-ops-assistant/
-backend/ # FastAPI backend + workers
-frontend/ # React frontend
-docker/ # Dockerfiles and infra config
-samples/ # Sample incident bundles & logs
-docker-compose.yml
-
+    backend/ # FastAPI backend + workers
+    frontend/ # React frontend
+    docker/ # Dockerfiles and infra config
+    samples/ # Sample incident bundles & logs
+    docker-compose.yml
+```
 
 ---
 
