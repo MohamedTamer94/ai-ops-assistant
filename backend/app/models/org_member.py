@@ -9,8 +9,8 @@ class OrganizationMember(Base):
     __tablename__ = "org_members"
 
     id = Column(UUID(as_uuid=True), primary_key=True, index=True, default=uuid.uuid4)
-    org_id = Column(UUID(as_uuid=True), ForeignKey('organizations.id'), nullable=False, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False, index=True)
+    org_id = Column(UUID(as_uuid=True), ForeignKey('organizations.id', ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String, nullable=False, default="member")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

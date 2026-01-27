@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
 
     # Secrets
-    secret_key: str = Field(..., env="JWT_SECRET")
+    jwt_secret: str = Field(..., env="JWT_SECRET")
 
     model_config = SettingsConfigDict(
         env_file=".env",

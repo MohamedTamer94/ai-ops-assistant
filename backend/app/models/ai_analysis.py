@@ -11,7 +11,7 @@ class AiAnalysis(Base):
     __tablename__ = "ai_analyses"
 
     id = Column(UUID(as_uuid=True), primary_key=True, index=True, default=uuid.uuid4)
-    ingestion_id = Column(UUID(as_uuid=True), ForeignKey('ingestions.id'), nullable=False, index=True)
+    ingestion_id = Column(UUID(as_uuid=True), ForeignKey('ingestions.id', ondelete="CASCADE"), nullable=False, index=True)
     mode = Column(String, nullable=False)
     result = Column(JSONB, nullable=True, default={})
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -12,7 +12,7 @@ class LogEvent(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     ingestion_id = Column(UUID(as_uuid=True), ForeignKey("ingestions.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    ts = Column(DateTime(timezone=True), nullable=True)
+    ts = Column(DateTime(timezone=True), nullable=True, index=True)
     service = Column(String, nullable=True)
     level = Column(String, nullable=True)
 

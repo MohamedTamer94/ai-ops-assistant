@@ -10,11 +10,11 @@ class Project(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, index=True, default=uuid.uuid4)
     name = Column(String, index=True, nullable=False)
-    org_id = Column(UUID(as_uuid=True), ForeignKey('organizations.id'), nullable=False, index=True)
+    org_id = Column(UUID(as_uuid=True), ForeignKey('organizations.id', ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     organization = relationship("Organization", back_populates="projects")
-    ingestions = relationship("Ingestion", back_populates="project", cascade="all, delete-orphan")
+    ingestions = relationship("Ingestion", back_populates="project", cascade="all, delete-orphan", passive_deletes=True,)
 
     __tableargs__ = (
         # Ensure project names are unique within an organization

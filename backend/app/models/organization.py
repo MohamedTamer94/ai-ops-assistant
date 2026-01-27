@@ -12,5 +12,5 @@ class Organization(Base):
     name = Column(String,index=True, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    projects = relationship("Project", back_populates="organization", cascade="all, delete-orphan")
-    org_members = relationship("OrganizationMember", back_populates="organization", cascade="all, delete-orphan")
+    projects = relationship("Project", back_populates="organization", cascade="all, delete-orphan", passive_deletes=True,)
+    org_members = relationship("OrganizationMember", back_populates="organization", cascade="all, delete-orphan", passive_deletes=True,)

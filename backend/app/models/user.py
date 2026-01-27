@@ -15,5 +15,5 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    org_members = relationship("OrganizationMember", back_populates="user", cascade="all, delete-orphan")
+    org_members = relationship("OrganizationMember", back_populates="user", cascade="all, delete-orphan", passive_deletes=True,)
 

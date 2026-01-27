@@ -16,6 +16,6 @@ class Ingestion(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     project = relationship("Project", back_populates="ingestions")
-    log_events = relationship("LogEvent", back_populates="ingestion", cascade="all, delete-orphan")
-    findings = relationship("Finding", back_populates="ingestion", cascade="all, delete-orphan")
-    ai_analyses = relationship("AiAnalysis", back_populates="ingestion", cascade="all, delete-orphan")
+    log_events = relationship("LogEvent", back_populates="ingestion", cascade="all, delete-orphan", passive_deletes=True,)
+    findings = relationship("Finding", back_populates="ingestion", cascade="all, delete-orphan", passive_deletes=True,)
+    ai_analyses = relationship("AiAnalysis", back_populates="ingestion", cascade="all, delete-orphan", passive_deletes=True,)
