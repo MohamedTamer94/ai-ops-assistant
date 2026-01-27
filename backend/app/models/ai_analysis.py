@@ -1,5 +1,5 @@
 
-from backend.app.db import Base
+from app.db import Base
 
 import uuid
 from sqlalchemy import Column, ForeignKey, String, DateTime
@@ -13,7 +13,7 @@ class AiAnalysis(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, index=True, default=uuid.uuid4)
     ingestion_id = Column(UUID(as_uuid=True), ForeignKey('ingestions.id'), nullable=False, index=True)
     mode = Column(String, nullable=False)
-    result = Column(JSONB, nullable=True)
+    result = Column(JSONB, nullable=True, default={})
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     ingestion = relationship('Ingestion', back_populates='ai_analyses')

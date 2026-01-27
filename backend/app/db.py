@@ -4,9 +4,9 @@ import os
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from app.config import settings
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:mypassword@localhost/knowbase")
-engine = create_engine(DATABASE_URL, echo=True)
+engine = create_engine(settings.database_url, echo=settings.debug)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

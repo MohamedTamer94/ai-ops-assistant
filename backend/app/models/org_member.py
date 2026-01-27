@@ -14,8 +14,8 @@ class OrganizationMember(Base):
     role = Column(String, nullable=False, default="member")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    user = relationship('User', back_populates='org_members')
-    organization = relationship('Organization', back_populates='org_members')
+    user = relationship("User", back_populates="org_members")
+    organization = relationship("Organization", back_populates="org_members")
 
     __table_args__ = (
         # Ensure a user can only have one role per organization
