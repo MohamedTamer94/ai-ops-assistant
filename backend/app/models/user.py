@@ -12,8 +12,16 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, index=True, default=uuid.uuid4)
     email = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=True)
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     org_members = relationship("OrganizationMember", back_populates="user", cascade="all, delete-orphan", passive_deletes=True,)
+    organizations = relationship(
+        "Organization",
+        secondary="org_members",
+        primaryjoin="User.id==OrganizationMember.user_id",
+        secondaryjoin="Organization.id==OrganizationMember.org_id",
+        viewonly=True,
+    )
 

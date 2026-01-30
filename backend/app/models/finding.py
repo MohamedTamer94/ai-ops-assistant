@@ -5,6 +5,7 @@ from app.db import Base
 from sqlalchemy import Column, Float, ForeignKey, String, DateTime
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
 class Finding(Base):
     __tablename__ = 'findings'
@@ -18,3 +19,5 @@ class Finding(Base):
     evidence_event_ids = Column(JSONB, nullable=True, default=[])
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    ingestion = relationship('Ingestion', back_populates='findings')

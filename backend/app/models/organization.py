@@ -14,3 +14,10 @@ class Organization(Base):
 
     projects = relationship("Project", back_populates="organization", cascade="all, delete-orphan", passive_deletes=True,)
     org_members = relationship("OrganizationMember", back_populates="organization", cascade="all, delete-orphan", passive_deletes=True,)
+    users = relationship(
+        "User",
+        secondary="org_members",
+        primaryjoin="Organization.id==OrganizationMember.org_id",
+        secondaryjoin="User.id==OrganizationMember.user_id",
+        viewonly=True,
+    )
