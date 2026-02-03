@@ -30,7 +30,7 @@ async def register(user: RegisterRequest, db: Session = Depends(get_db)):
 async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Session = Depends(get_db)):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        raise HTTPException(status_code=400, detail="Invalid credentials")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
     
     token = create_access_token(user_id=str(user.id))
     return {"access_token": token, "token_type": "bearer"}

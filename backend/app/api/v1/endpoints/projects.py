@@ -1,19 +1,39 @@
-from fastapi import APIRouter, Depends
-
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.db import get_db
+from app.dependencies.auth_dependencies import get_current_user
 from app.schemas.projects import ProjectCreateRequest
 from app.crud.projects import create_project as create_project_crud, get_projects_by_org
-from app.db import get_db
+from app.crud.organizations import get_membership
 
 router = APIRouter()
 
 @router.post("/")
-async def create_project(db: Session = Depends(get_db), org_id: str = None, project: ProjectCreateRequest = None):
+def create_project(
+    org_id: str,
+    project: ProjectCreateRequest,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    membership = get_membership(db, org_id=org_id, user_id=str(current_user.id))
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of this organization")
+    if membership.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+
     db_project = create_project_crud(db, org_id=org_id, name=project.name)
     return {"id": db_project.id, "name": db_project.name, "org_id": db_project.org_id}
 
 @router.get("/")
-async def list_projects(db: Session = Depends(get_db), org_id: str = None):
+def list_projects(
+    org_id: str,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    membership = get_membership(db, org_id=org_id, user_id=str(current_user.id))
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of this organization")
+
     projects = get_projects_by_org(db, org_id=org_id)
-    return [{"id": project.id, "name": project.name, "org_id": project.org_id} for project in projects]
+    return [{"id": p.id, "name": p.name, "org_id": p.org_id} for p in projects]

@@ -1,4 +1,5 @@
 from jose import jwt
+from jose.exceptions import JWTError
 from datetime import datetime, timedelta
 from typing import Optional
 from app.config import settings
@@ -8,7 +9,7 @@ JWT_ALGORITHM = "HS256"
 
 def create_access_token(user_id: str, expires_delta: Optional[timedelta] = None):
     payload = {
-        "user_id": user_id
+        "sub": user_id
     }
     expires = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     payload.update({"exp": expires})
@@ -19,5 +20,5 @@ def decode_access_token(token: str):
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[JWT_ALGORITHM])
         return payload
-    except jwt.JWTError:
+    except JWTError:
         return None
