@@ -8,6 +8,7 @@ from app.crud.ingestions import create_ingestion as create_ingestion_crud, check
 from app.crud.projects import check_project_in_organization
 from app.schemas.ingestions import IngestionCreateRequest, IngestionPasteLogsRequest
 from app.utils.storage import save_ingestion_text
+from app.tasks.ingestion_processing import process_ingestion
 
 router = APIRouter()
 
@@ -34,6 +35,7 @@ def paste_logs(org_id: str, project_id: str, ingestion_id: str, payload: Ingesti
     if not ingestion:
         raise HTTPException(status_code=404, detail="Ingestion not found in this project")
     save_ingestion_text(ingestion_id, payload.text)
+    process_ingestion.delay(ingestion_id)
     return {"message": "Logs saved successfully."}
     
 @router.get("/{ingestion_id}")
