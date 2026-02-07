@@ -5,6 +5,7 @@ from app.utils.storage import read_ingestion_text
 from app.models.log_event import LogEvent
 from app.utils.fingerprint import make_fingerprint
 from app.utils.log_parser import parse_logs
+from app.tasks.findings_engine import analyze_logs_for_findings
 
 @celery.task
 def process_ingestion(ingestion_id: str):
@@ -39,6 +40,7 @@ def process_ingestion(ingestion_id: str):
         db.commit()
         ingestion.status = "done"
         db.commit()
+        analyze_logs_for_findings.delay(ingestion_id)
     except Exception as e:
         ingestion.status = "failed"
         db.commit()

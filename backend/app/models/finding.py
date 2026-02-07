@@ -17,6 +17,8 @@ class Finding(Base):
     severity = Column(String, nullable=False)
     confidence = Column(Float, nullable=False)
     evidence_event_ids = Column(JSONB, nullable=True, default=[])
+    matched_fingerprints = Column(JSONB, nullable=True, default=[])
+    total_occurrences = Column(Float, nullable=False, default=1)
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

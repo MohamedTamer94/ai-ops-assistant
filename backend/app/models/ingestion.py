@@ -13,6 +13,7 @@ class Ingestion(Base):
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     source_type = Column(String, nullable=False)  # later: CHECK constraint
     status = Column(String, nullable=False, default="pending")  # later: CHECK constraint
+    finding_status = Column(String, nullable=False, default="pending")  # pending, processing, done, failed
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     project = relationship("Project", back_populates="ingestions")

@@ -12,3 +12,4 @@ celery = Celery(
 )
 
 from app.tasks import ingestion_processing
+from app.tasks import findings_engine
