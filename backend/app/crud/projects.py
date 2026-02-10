@@ -14,3 +14,11 @@ def get_projects_by_org(db: Session, org_id: str):
 def check_project_in_organization(db: Session, project_id: str, org_id: str):
     project = db.query(Project).filter(Project.id == project_id, Project.org_id == org_id).first()
     return project
+
+def delete_project(db: Session, project_id: str):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project:
+        db.delete(project)
+        db.commit()
+        return True
+    return False

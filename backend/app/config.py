@@ -2,6 +2,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 class Settings(BaseSettings):
+    # LLM / AI
+    groq_api_key: str = Field(..., env="GROQ_API_KEY")
+    groq_llm_model: str = Field(default="llama-3.3-70b-versatile", env="GROQ_LLM_MODEL")
+
     # Application environment
     env: str = Field(default="local", env="ENV")
 

@@ -38,3 +38,22 @@ def normalize_for_fingerprint(text):
     text = re.sub(r"\s+", " ", text)
     return text
 
+def redact_message(text):
+    # Remove leading/trailing whitespace and convert to lowercase
+    text = text.strip().lower()
+    # Replace UUID patterns with a placeholder
+    text = re.sub(UUID_PATTERN, "<uuid>", text)
+    # Replace IP address patterns with a placeholder
+    text = re.sub(IP_PATTERN, "<ip>", text)
+    # Replace hexadecimal patterns with a placeholder
+    text = re.sub(HEX_PATTERN, "<hex>", text)
+    # Replace email address patterns with a placeholder
+    text = re.sub(EMAIL_PATTERN, "<email>", text)
+    # Replace URL patterns with a placeholder
+    text = re.sub(URL_PATTERN, "<url>", text)
+    # Replace token-like patterns with a placeholder
+    text = re.sub(TOKEN_PATTERN, "<token>", text)
+    # Collapse multiple spaces into one
+    text = re.sub(r"\s+", " ", text)
+    return text
+

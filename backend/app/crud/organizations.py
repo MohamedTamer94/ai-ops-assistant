@@ -33,3 +33,11 @@ def require_org_admin(db: Session, org_id: str, user_id: str):
     if not m:
         return None
     return m if m.role == "admin" else False
+
+def delete_organization(db: Session, org_id: str):
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if org:
+        db.delete(org)
+        db.commit()
+        return True
+    return False

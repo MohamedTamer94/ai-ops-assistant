@@ -82,10 +82,10 @@ export const getIngestionOverview = async (orgId, projectId, ingestionId) => {
   return response.data
 }
 
-export const listIngestionEvents = async (orgId, projectId, ingestionId, cursor = 0, limit = 100) => {
+export const listIngestionEvents = async (orgId, projectId, ingestionId, params = {}) => {
   const response = await api.get(
     `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/events`,
-    { params: { cursor, limit } }
+    { params }
   )
   return response.data
 }
@@ -93,6 +93,36 @@ export const listIngestionEvents = async (orgId, projectId, ingestionId, cursor 
 export const getIngestionFindings = async (orgId, projectId, ingestionId) => {
   const response = await api.get(
     `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/findings`
+  )
+  return response.data
+}
+
+export const getGroupOverview = async (orgId, projectId, ingestionId, fingerprint) => {
+  const response = await api.get(
+    `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/groups/${fingerprint}`
+  )
+  return response.data
+}
+
+export const getFindingDetails = async (orgId, projectId, ingestionId, findingId) => {
+  const response = await api.get(
+    `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/findings/${findingId}`
+  )
+  return response.data
+}
+
+export const generateInsight = async (orgId, projectId, ingestionId, scopeType, scopeId) => {
+  const body = {
+    scope_type: scopeType,
+  }
+  if (scopeType === 'group') {
+    body.fingerprint = scopeId
+  } else if (scopeType === 'finding') {
+    body.finding_id = scopeId
+  }
+  const response = await api.post(
+    `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/insights`,
+    body
   )
   return response.data
 }

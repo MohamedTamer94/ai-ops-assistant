@@ -1,14 +1,36 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { getIngestionOverview, listIngestionEvents, getIngestionFindings } from '../lib/api'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
+import { getIngestionOverview, getIngestionFindings } from '../lib/api'
+import EventsList from '../components/EventsList'
+
+function GroupLink({ orgId, projectId, ingestionId, fingerprint, children }) {
+  return (
+    <Link
+      to={`/app/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/groups/${fingerprint}`}
+      className="text-blue-600 hover:text-blue-700 hover:underline transition font-medium"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </Link>
+  )
+}
 
 function IngestionDetailsPage() {
   const { orgId, projectId, ingestionId } = useParams()
+  const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState('overview')
   const [overview, setOverview] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pollingEnabled, setPollingEnabled] = useState(true)
+
+  // Handle query parameters
+  useEffect(() => {
+    const tabParam = searchParams.get('tab')
+    if (tabParam && ['overview', 'findings', 'events'].includes(tabParam)) {
+      setActiveTab(tabParam)
+    }
+  }, [searchParams])
 
   useEffect(() => {
     fetchOverview()
@@ -58,33 +80,33 @@ function IngestionDetailsPage() {
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-4 xs:mb-6">
         <Link
           to={`/app/orgs/${orgId}/projects/${projectId}/ingestions`}
-          className="text-blue-600 hover:text-blue-700 text-sm"
+          className="text-blue-600 hover:text-blue-700 text-xs xs:text-sm"
         >
           ← Back to Ingestions
         </Link>
       </div>
 
       {error && (
-        <div className="p-4 mb-6 bg-red-50 border border-red-200 text-red-700 rounded">
+        <div className="p-3 sm:p-4 mb-4 sm:mb-6 bg-red-50 border border-red-200 text-red-700 rounded text-xs sm:text-base">
           {error}
         </div>
       )}
 
       {loading && !overview ? (
-        <p className="text-gray-600">Loading...</p>
+        <p className="text-gray-600 text-sm">Loading...</p>
       ) : (
         <>
           {/* Tabs */}
-          <div className="border-b border-gray-200 mb-6">
-            <div className="flex gap-8">
+          <div className="border-b border-gray-200 mb-4 sm:mb-6 overflow-x-auto">
+            <div className="flex gap-2 sm:gap-8 min-w-min sm:min-w-0">
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`py-3 px-1 border-b-2 font-medium text-sm transition ${
+                  className={`py-2 sm:py-3 px-2 sm:px-1 border-b-2 font-medium text-xs sm:text-sm transition whitespace-nowrap sm:whitespace-normal ${
                     activeTab === tab.id
                       ? 'border-blue-600 text-blue-600'
                       : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
@@ -97,12 +119,12 @@ function IngestionDetailsPage() {
           </div>
 
           {/* Tab Content */}
-          {activeTab === 'overview' && <OverviewTab overview={overview} />}
+          {activeTab === 'overview' && <OverviewTab overview={overview} orgId={orgId} projectId={projectId} ingestionId={ingestionId} />}
           {activeTab === 'findings' && (
             <FindingsTab orgId={orgId} projectId={projectId} ingestionId={ingestionId} />
           )}
           {activeTab === 'events' && (
-            <EventsTab orgId={orgId} projectId={projectId} ingestionId={ingestionId} />
+            <EventsList orgId={orgId} projectId={projectId} ingestionId={ingestionId} fingerprint={searchParams.get('fingerprint')} showFilters={true} showTitle={true} />
           )}
         </>
       )}
@@ -110,7 +132,7 @@ function IngestionDetailsPage() {
   )
 }
 
-function OverviewTab({ overview }) {
+function OverviewTab({ overview, orgId, projectId, ingestionId }) {
   if (!overview) return null
 
   const ingestion = overview.ingestion
@@ -162,24 +184,24 @@ function OverviewTab({ overview }) {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow p-4">
-          <p className="text-xs font-medium text-gray-600 uppercase">Total Events</p>
-          <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.total_events || 0}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
+        <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+          <p className="text-xs font-medium text-gray-600 uppercase tracking-tight">Total Events</p>
+          <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-2">{stats?.total_events || 0}</p>
         </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <p className="text-xs font-medium text-gray-600 uppercase">Events with TS</p>
-          <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.total_events_with_ts || 0}</p>
+        <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+          <p className="text-xs font-medium text-gray-600 uppercase tracking-tight">Events with TS</p>
+          <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-2">{stats?.total_events_with_ts || 0}</p>
         </div>
         {stats?.time_range && (
           <>
-            <div className="bg-white rounded-lg shadow p-4">
-              <p className="text-xs font-medium text-gray-600 uppercase">Min Timestamp</p>
-              <p className="text-sm font-mono text-gray-900 mt-2">{stats.time_range.min_ts}</p>
+            <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+              <p className="text-xs font-medium text-gray-600 uppercase tracking-tight">Min Timestamp</p>
+              <p className="text-xs sm:text-sm font-mono text-gray-900 mt-2 break-all">{stats.time_range.min_ts}</p>
             </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <p className="text-xs font-medium text-gray-600 uppercase">Max Timestamp</p>
-              <p className="text-sm font-mono text-gray-900 mt-2">{stats.time_range.max_ts}</p>
+            <div className="bg-white rounded-lg shadow p-3 sm:p-4">
+              <p className="text-xs font-medium text-gray-600 uppercase tracking-tight">Max Timestamp</p>
+              <p className="text-xs sm:text-sm font-mono text-gray-900 mt-2 break-all">{stats.time_range.max_ts}</p>
             </div>
           </>
         )}
@@ -188,33 +210,37 @@ function OverviewTab({ overview }) {
       {/* Top Groups */}
       {groups.top && groups.top.length > 0 && (
         <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="border-b border-gray-200 px-6 py-4">
-            <h3 className="text-lg font-semibold text-gray-900">Top Groups</h3>
+          <div className="border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900">Top Groups</h3>
           </div>
           <div className="divide-y divide-gray-200">
             {groups.top.map((group) => (
-              <div key={group.fingerprint} className="px-6 py-4">
-                <div className="flex justify-between items-start gap-4">
-                  <div className="flex-1">
-                    <p className="text-sm font-mono text-gray-500 mb-2">{group.fingerprint.substring(0, 16)}...</p>
-                    <p className="text-sm text-gray-700 mb-2">{group.latest?.message}</p>
+              <Link
+                key={group.fingerprint}
+                to={`/app/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/groups/${group.fingerprint}`}
+                className="px-4 sm:px-6 py-3 sm:py-4 hover:bg-blue-50 transition block"
+              >
+                <div className="flex justify-between items-start gap-2 sm:gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs sm:text-sm font-mono text-blue-600 mb-1 sm:mb-2 truncate hover:text-blue-700">{group.fingerprint.substring(0, 16)}...</p>
+                    <p className="text-xs sm:text-sm text-gray-700 mb-1 sm:mb-2 break-words line-clamp-2">{group.latest?.message}</p>
                     {group.latest && (
-                      <div className="flex items-center gap-4 text-xs text-gray-600">
-                        {group.latest.service && <span>Service: {group.latest.service}</span>}
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                        {group.latest.service && <span className="truncate">Service: {group.latest.service}</span>}
                         {group.latest.level && (
-                          <span className={`px-2 py-1 rounded ${getLevelBadgeColor(group.latest.level)}`}>
+                          <span className={`px-2 py-1 rounded text-xs ${getLevelBadgeColor(group.latest.level)} flex-shrink-0`}>
                             {group.latest.level}
                           </span>
                         )}
                       </div>
                     )}
                   </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-gray-900">{group.count}</p>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-xl sm:text-2xl font-bold text-gray-900">{group.count}</p>
                     <p className="text-xs text-gray-500">occurrences</p>
                   </div>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
@@ -279,179 +305,39 @@ function FindingsTab({ orgId, projectId, ingestionId }) {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow overflow-hidden">
-      <table className="w-full">
+    <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <table className="w-full text-xs sm:text-sm">
         <thead className="bg-gray-50 border-b border-gray-200">
           <tr>
-            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Title</th>
-            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Severity</th>
-            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Confidence</th>
-            <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Occurrences</th>
+            <th className="px-3 sm:px-6 py-2 sm:py-3 text-left font-semibold text-gray-900">Title</th>
+            <th className="px-3 sm:px-6 py-2 sm:py-3 text-left font-semibold text-gray-900">Severity</th>
+            <th className="px-3 sm:px-6 py-2 sm:py-3 text-left font-semibold text-gray-900 hidden sm:table-cell">Confidence</th>
+            <th className="px-3 sm:px-6 py-2 sm:py-3 text-left font-semibold text-gray-900">Count</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
           {sorted.map((finding) => (
-            <tr key={finding.id} className="hover:bg-gray-50">
-              <td className="px-6 py-3 text-sm text-gray-700">{finding.title}</td>
-              <td className="px-6 py-3 text-sm">
+            <tr key={finding.id} className="hover:bg-blue-50 cursor-pointer transition">
+              <td className="px-3 sm:px-6 py-2 sm:py-3 text-gray-700 font-medium">
+                <Link
+                  to={`/app/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/findings/${finding.id}`}
+                  className="text-blue-600 hover:text-blue-700 hover:underline transition"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {finding.title}
+                </Link>
+              </td>
+              <td className="px-3 sm:px-6 py-2 sm:py-3">
                 <span className={`px-2 py-1 rounded text-xs font-medium ${getSeverityBadgeColor(finding.severity)}`}>
                   {finding.severity}
                 </span>
               </td>
-              <td className="px-6 py-3 text-sm text-gray-700">{finding.confidence || '—'}</td>
-              <td className="px-6 py-3 text-sm font-medium text-gray-900">{finding.total_occurrences || 0}</td>
+              <td className="px-3 sm:px-6 py-2 sm:py-3 text-gray-700 hidden sm:table-cell">{finding.confidence || '—'}</td>
+              <td className="px-3 sm:px-6 py-2 sm:py-3 font-medium text-gray-900">{finding.total_occurrences || 0}</td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
-  )
-}
-
-function EventsTab({ orgId, projectId, ingestionId }) {
-  const [events, setEvents] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [cursor, setCursor] = useState(0)
-  const [hasMore, setHasMore] = useState(false)
-  const [filterLevel, setFilterLevel] = useState('all')
-  const [filterService, setFilterService] = useState('')
-
-  useEffect(() => {
-    fetchEvents(0)
-  }, [orgId, projectId, ingestionId])
-
-  const fetchEvents = async (newCursor) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await listIngestionEvents(orgId, projectId, ingestionId, newCursor, 100)
-      if (newCursor === 0) {
-        setEvents(data.items)
-      } else {
-        setEvents((prev) => [...prev, ...data.items])
-      }
-      setCursor(data.next_cursor)
-      setHasMore(data.has_more)
-    } catch (err) {
-      setError(err.response?.data?.detail || err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const getLevelBadgeColor = (level) => {
-    switch (level?.toUpperCase()) {
-      case 'CRITICAL':
-      case 'CRIT':
-        return 'bg-red-100 text-red-800'
-      case 'ERROR':
-        return 'bg-red-50 text-red-700'
-      case 'WARN':
-      case 'WARNING':
-        return 'bg-yellow-100 text-yellow-800'
-      case 'INFO':
-        return 'bg-blue-50 text-blue-700'
-      case 'DEBUG':
-        return 'bg-gray-100 text-gray-700'
-      default:
-        return 'bg-gray-100 text-gray-800'
-    }
-  }
-
-  // Filter events
-  const filtered = events.filter((event) => {
-    if (filterLevel !== 'all' && event.level?.toUpperCase() !== filterLevel.toUpperCase()) {
-      return false
-    }
-    if (filterService && !event.service?.toLowerCase().includes(filterService.toLowerCase())) {
-      return false
-    }
-    return true
-  })
-
-  return (
-    <div className="space-y-4">
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-4 flex gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
-          <select
-            value={filterLevel}
-            onChange={(e) => setFilterLevel(e.target.value)}
-            className="px-3 py-1 border border-gray-300 rounded text-sm"
-          >
-            <option value="all">All</option>
-            <option value="ERROR">ERROR</option>
-            <option value="WARN">WARN</option>
-            <option value="INFO">INFO</option>
-            <option value="DEBUG">DEBUG</option>
-          </select>
-        </div>
-        <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Service</label>
-          <input
-            type="text"
-            placeholder="Filter by service..."
-            value={filterService}
-            onChange={(e) => setFilterService(e.target.value)}
-            className="w-full px-3 py-1 border border-gray-300 rounded text-sm"
-          />
-        </div>
-      </div>
-
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded">{error}</div>
-      )}
-
-      {loading && events.length === 0 ? (
-        <p className="text-gray-600">Loading events...</p>
-      ) : filtered.length === 0 ? (
-        <p className="text-gray-600">No events match the filters.</p>
-      ) : (
-        <>
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Seq</th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Timestamp</th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Level</th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Service</th>
-                  <th className="px-6 py-3 text-left font-semibold text-gray-900">Message</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filtered.map((event) => (
-                  <tr key={event.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-3 font-mono text-gray-700">{event.seq}</td>
-                    <td className="px-6 py-3 font-mono text-xs text-gray-600">{event.ts || '—'}</td>
-                    <td className="px-6 py-3">
-                      {event.level && (
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${getLevelBadgeColor(event.level)}`}>
-                          {event.level}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-3 text-gray-700">{event.service || '—'}</td>
-                    <td className="px-6 py-3 text-gray-700 break-words max-w-xs">{event.message}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {hasMore && (
-            <button
-              onClick={() => fetchEvents(cursor)}
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded transition"
-            >
-              {loading ? 'Loading...' : 'Load More'}
-            </button>
-          )}
-        </>
-      )}
     </div>
   )
 }

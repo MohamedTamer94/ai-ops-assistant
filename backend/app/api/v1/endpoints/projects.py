@@ -5,7 +5,7 @@ from app.db import get_db
 from app.dependencies.auth_dependencies import get_current_user
 from app.schemas.projects import ProjectCreateRequest
 from app.crud.projects import create_project as create_project_crud, get_projects_by_org
-from app.crud.organizations import get_membership
+from app.crud.organizations import get_membership, require_org_admin
 
 router = APIRouter()
 
@@ -37,3 +37,21 @@ def list_projects(
 
     projects = get_projects_by_org(db, org_id=org_id)
     return [{"id": p.id, "name": p.name, "org_id": p.org_id} for p in projects]
+
+@router.delete("/{project_id}")
+def delete_project(
+    project_id: str,
+    org_id: str,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    membership = require_org_admin(db, org_id=org_id, user_id=str(current_user.id))
+    if membership is False:
+        raise HTTPException(status_code=403, detail="Admin role required")
+    elif membership is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    success = delete_project(db, project_id)
+    if success:
+        return {"message": "Project deleted successfully"}
+    else:
+        return {"error": "Project not found"}
