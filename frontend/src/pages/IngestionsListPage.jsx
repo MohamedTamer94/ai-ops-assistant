@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { listIngestions } from '../lib/api'
+import useRequireAuth from '../hooks/useRequireAuth'
 
 function IngestionsListPage() {
   const { orgId, projectId } = useParams()
   const navigate = useNavigate()
+  useRequireAuth()
   const [ingestions, setIngestions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)

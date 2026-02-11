@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies.auth_dependencies import get_current_user
 from app.schemas.projects import ProjectCreateRequest
-from app.crud.projects import create_project as create_project_crud, get_projects_by_org
+from app.crud.projects import create_project as create_project_crud, get_projects_by_org, delete_project as delete_project_crud
 from app.crud.organizations import get_membership, require_org_admin
 
 router = APIRouter()
@@ -50,7 +50,7 @@ def delete_project(
         raise HTTPException(status_code=403, detail="Admin role required")
     elif membership is None:
         raise HTTPException(status_code=404, detail="Organization not found")
-    success = delete_project(db, project_id)
+    success = delete_project_crud(db, project_id)
     if success:
         return {"message": "Project deleted successfully"}
     else:

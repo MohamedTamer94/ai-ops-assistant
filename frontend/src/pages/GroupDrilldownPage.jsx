@@ -137,7 +137,7 @@ function GroupDrilldownPage() {
             ingestionId={ingestionId}
             scopeType="group"
             scopeId={fingerprint}
-            initialInsight={groupData.group?.insight}
+            initialInsight={groupData.insight}
           />
         </>
       ) : null}

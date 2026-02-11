@@ -2,6 +2,8 @@ from app.models.organization import Organization
 from app.models.org_member import OrganizationMember
 from sqlalchemy.orm import Session
 
+from app.models.user import User
+
 def create_organization(db: Session, name: str):
     db_org = Organization(name=name)
     db.add(db_org)
@@ -41,3 +43,41 @@ def delete_organization(db: Session, org_id: str):
         db.commit()
         return True
     return False
+
+def list_organization_users(db: Session, org_id: str):
+    return (
+        db.query(OrganizationMember)
+        .filter(OrganizationMember.org_id == org_id)
+        .all()
+    )
+
+def add_user_to_org(db: Session, org_id: str, email: str, role: str = "member"):
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        return None
+    # check if user is already a member
+    existing_membership = db.query(OrganizationMember).filter(OrganizationMember.org_id == org_id, OrganizationMember.user_id == user.id).first()
+    if existing_membership:
+        return existing_membership
+    new_membership = OrganizationMember(org_id=org_id, user_id=user.id, role=role)
+    db.add(new_membership)
+    db.commit()
+    db.refresh(new_membership)
+    return new_membership
+
+def remove_user_from_org(db: Session, org_id: str, user_id: str):
+    membership = db.query(OrganizationMember).filter(OrganizationMember.org_id == org_id, OrganizationMember.user_id == user_id).first()
+    if membership:
+        db.delete(membership)
+        db.commit()
+        return True
+    return False
+
+def update_user_role_in_org(db: Session, org_id: str, user_id: str, new_role: str):
+    membership = db.query(OrganizationMember).filter(OrganizationMember.org_id == org_id, OrganizationMember.user_id == user_id).first()
+    if membership:
+        membership.role = new_role
+        db.commit()
+        db.refresh(membership)
+        return membership
+    return None

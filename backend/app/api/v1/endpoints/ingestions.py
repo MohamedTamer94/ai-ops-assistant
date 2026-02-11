@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -42,6 +42,22 @@ def paste_logs(org_id: str, project_id: str, ingestion_id: str, payload: Ingesti
     save_ingestion_text(ingestion_id, payload.text)
     process_ingestion.delay(ingestion_id)
     return {"message": "Logs saved successfully."}
+
+@router.post("/{ingestion_id}/logs/upload")
+def upload_logs(org_id: str, project_id: str, ingestion_id: str, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    org_membership = require_org_member(db, org_id, current_user.id)
+    if not org_membership:
+        raise HTTPException(status_code=403, detail="Not a member of this organization")
+    project = check_project_in_organization(db, project_id=project_id, org_id=org_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found in this organization")
+    ingestion = check_ingestion_in_project(db, ingestion_id=ingestion_id, project_id=project.id)
+    if not ingestion:
+        raise HTTPException(status_code=404, detail="Ingestion not found in this project")
+    content = file.file.read().decode("utf-8")
+    save_ingestion_text(ingestion_id, content)
+    process_ingestion.delay(ingestion_id)
+    return {"message": "Logs uploaded and saved successfully."}
     
 @router.get("/{ingestion_id}")
 def get_ingestion(org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../stores/auth'
 import OrgSelectPage from '../pages/OrgSelectPage'
 import ProjectsPage from '../pages/ProjectsPage'
+import OrgMembersPage from '../pages/OrgMembersPage'
 import ProjectLayout from './ProjectLayout'
 
 function AppLayout() {
@@ -39,6 +40,7 @@ function AppLayout() {
       <Routes>
         <Route path="/" element={<OrgSelectPage />} />
         <Route path="/orgs/:orgId/projects" element={<ProjectsPage />} />
+        <Route path="/orgs/:orgId/members" element={<OrgMembersPage />} />
         <Route path="/orgs/:orgId/projects/:projectId/*" element={<ProjectLayout />} />
       </Routes>
     </div>

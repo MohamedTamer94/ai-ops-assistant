@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link, useSearchParams } from 'react-router-dom'
-import { getIngestionOverview, getIngestionFindings } from '../lib/api'
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom'
+import { getIngestionOverview, getIngestionFindings, deleteIngestion } from '../lib/api'
+import useRequireAuth from '../hooks/useRequireAuth'
 import EventsList from '../components/EventsList'
+import ConfirmDialog from '../components/ConfirmDialog'
+import Toast from '../components/Toast'
 
 function GroupLink({ orgId, projectId, ingestionId, fingerprint, children }) {
   return (
@@ -18,11 +21,16 @@ function GroupLink({ orgId, projectId, ingestionId, fingerprint, children }) {
 function IngestionDetailsPage() {
   const { orgId, projectId, ingestionId } = useParams()
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  useRequireAuth()
   const [activeTab, setActiveTab] = useState('overview')
   const [overview, setOverview] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pollingEnabled, setPollingEnabled] = useState(true)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteMessage, setDeleteMessage] = useState({ show: false, text: '', type: 'success' })
 
   // Handle query parameters
   useEffect(() => {
@@ -69,6 +77,20 @@ function IngestionDetailsPage() {
       setError(err.response?.data?.detail || err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDeleteIngestion = async () => {
+    setDeleteConfirm(false)
+    setDeleting(true)
+    try {
+      await deleteIngestion(orgId, projectId, ingestionId)
+      setDeleteMessage({ show: true, text: 'Ingestion deleted successfully', type: 'success' })
+      setTimeout(() => navigate(`/app/orgs/${orgId}/projects/${projectId}/ingestions`), 1500)
+    } catch (err) {
+      const msg = err.response?.status === 403 ? 'Not allowed' : err.response?.data?.detail || 'Delete failed'
+      setDeleteMessage({ show: true, text: msg, type: 'error' })
+      setDeleting(false)
     }
   }
 
@@ -126,7 +148,41 @@ function IngestionDetailsPage() {
           {activeTab === 'events' && (
             <EventsList orgId={orgId} projectId={projectId} ingestionId={ingestionId} fingerprint={searchParams.get('fingerprint')} showFilters={true} showTitle={true} />
           )}
+
+          {/* Danger Zone */}
+          <div className="mt-8 xs:mt-12 pt-6 xs:pt-8 border-t border-gray-300">
+            <h3 className="text-base xs:text-lg font-semibold text-red-600 mb-3 xs:mb-4">Danger Zone</h3>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 xs:p-6">
+              <p className="text-xs xs:text-sm text-red-800 mb-3">Delete this ingestion and all its data permanently.</p>
+              <button
+                onClick={() => setDeleteConfirm(true)}
+                disabled={deleting}
+                className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white text-xs sm:text-sm font-medium px-3 xs:px-4 py-2 rounded transition"
+              >
+                Delete Ingestion
+              </button>
+            </div>
+          </div>
         </>
+      )}
+
+      {/* Delete Dialog and Toast */}
+      <ConfirmDialog
+        open={deleteConfirm}
+        title="Delete Ingestion?"
+        description="This will permanently delete the ingestion and all its logs, findings, and analysis. This action cannot be undone."
+        confirmText="Delete"
+        danger={true}
+        loading={deleting}
+        onConfirm={handleDeleteIngestion}
+        onCancel={() => setDeleteConfirm(false)}
+      />
+      {deleteMessage.show && (
+        <Toast
+          message={deleteMessage.text}
+          type={deleteMessage.type}
+          onClose={() => setDeleteMessage({ show: false, text: '', type: 'success' })}
+        />
       )}
     </div>
   )

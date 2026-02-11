@@ -75,6 +75,22 @@ export const pasteIngestionLogs = async (orgId, projectId, ingestionId, text) =>
   return response.data
 }
 
+export const uploadIngestionLogs = async (orgId, projectId, ingestionId, file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await api.post(
+    `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/logs/upload`,
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }
+  )
+  return response.data
+}
+
 export const getIngestionOverview = async (orgId, projectId, ingestionId) => {
   const response = await api.get(
     `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/overview`
@@ -124,6 +140,43 @@ export const generateInsight = async (orgId, projectId, ingestionId, scopeType, 
     `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/insights`,
     body
   )
+  return response.data
+}
+
+export const deleteOrganization = async (orgId) => {
+  const response = await api.delete(`/orgs/${orgId}`)
+  return response.data
+}
+
+export const deleteProject = async (orgId, projectId) => {
+  const response = await api.delete(`/orgs/${orgId}/projects/${projectId}`)
+  return response.data
+}
+
+export const deleteIngestion = async (orgId, projectId, ingestionId) => {
+  const response = await api.delete(
+    `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}`
+  )
+  return response.data
+}
+
+export const listOrgMembers = async (orgId) => {
+  const response = await api.get(`/orgs/${orgId}/users`)
+  return response.data
+}
+
+export const inviteOrgMember = async (orgId, payload) => {
+  const response = await api.post(`/orgs/${orgId}/users`, payload)
+  return response.data
+}
+
+export const updateOrgMemberRole = async (orgId, userId, role) => {
+  const response = await api.patch(`/orgs/${orgId}/users/${userId}`, { role })
+  return response.data
+}
+
+export const removeOrgMember = async (orgId, userId) => {
+  const response = await api.delete(`/orgs/${orgId}/users/${userId}`)
   return response.data
 }
 

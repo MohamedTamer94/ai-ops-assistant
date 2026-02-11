@@ -2,9 +2,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import AppLayout from './components/AppLayout'
-import OrgSelectPage from './pages/OrgSelectPage'
-import ProjectsPage from './pages/ProjectsPage'
-import ProjectDashboardPage from './pages/ProjectDashboardPage'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
