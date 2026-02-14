@@ -15,6 +15,7 @@ from app.models.ai_analysis import AiAnalysis
 from app.utils.ai_insights import generate_insights as generate_insights_util
 from app.crud.ai_analyses import create_ai_analysis, find_ai_analysis
 from app.security.rate_limit import limiter
+from app.security.user_rate_limit import enforce_user_limit
 
 router = APIRouter()
 
@@ -220,9 +221,10 @@ def get_ingestion_group_details(request: Request, org_id: str, project_id: str, 
         "insight": insight_result,
     }
 
-@limiter.limit("20/minute")
+@limiter.limit("2/minute")
 @router.post("/{ingestion_id}/insights")
 def generate_insights(request: Request, payload: InsightGenRequest, org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    enforce_user_limit(str(current_user.id), limit=2)
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
