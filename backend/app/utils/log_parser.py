@@ -1,389 +1,456 @@
-from typing import Any, Optional
+from typing import Any, Optional, List, Tuple
 import re
 import json
 from dateutil import parser as date_parser
 from dateutil.parser import ParserError
 
 # ----------------------------
-# Regex building blocks
+# Regex building blocks - ENHANCED
 # ----------------------------
 
-# Timestamp-ish patterns near the start of a line
-# Covers:
-# 2026-02-05T12:34:56.123Z
-# 2026-02-05T12:34:56+03:00
-# 2026-02-05 12:34:56,123
-# 2026-02-05 12:34:56
-RE_TS_PREFIX = re.compile(
+# Timestamp patterns for your exact formats
+# ISO 8601 with Z: 2024-11-29T14:59:45.123Z
+# ISO with offset: 2024-11-29 14:59:45.234 UTC
+# Standard: 2026-02-13 09:52:15.234 UTC
+RE_TIMESTAMP = re.compile(
     r"""
     ^\s*
     (?P<ts>
-        \d{4}-\d{2}-\d{2}
-        (?:[ T]\d{2}:\d{2}(?::\d{2})?)?
-        (?:[.,]\d{1,6})?
-        (?:Z|[+-]\d{2}:\d{2})?
+        # ISO 8601 with T and Z/offset
+        \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})
+        |
+        # Space separated with UTC
+        \d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?\s+UTC
+        |
+        # Space separated no timezone
+        \d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?
     )
     (?:\s+|$)
     """,
     re.VERBOSE,
 )
 
-# [2026-02-05 ...] style
-RE_TS_BRACKET = re.compile(
-    r"""^\s*\[\s*(?P<ts>\d{4}-\d{2}-\d{2}[^]]*)\]\s*""", re.VERBOSE
+# Bracket timestamp: [2024-11-29T14:59:45.123Z]
+RE_TIMESTAMP_BRACKET = re.compile(
+    r"""^\s*\[\s*(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?)\s*\]\s*""",
+    re.VERBOSE
 )
 
-# Levels at the start: INFO ... or [ERROR] ...
-RE_LEVEL_PREFIX = re.compile(
-    r"""^\s*\[?(?P<level>INFO|WARN|WARNING|ERROR|DEBUG|TRACE|CRITICAL|FATAL)\]?\b[:\-]?\s*""",
-    re.IGNORECASE,
-)
-
-# level=warn / severity=error / lvl=info ...
-RE_LEVEL_KV = re.compile(
-    r"""(?i)\b(?:level|severity|lvl)\s*=\s*(?P<level>info|warn|warning|error|debug|trace|critical|fatal)\b"""
-)
-
-# service=foo / svc=foo / app=foo / component=foo
-RE_SERVICE_KV = re.compile(
-    r"""(?i)\b(?:service|svc|app|component|source|logger)\s*=\s*(?P<svc>[A-Za-z0-9_.\-]+)\b"""
-)
-
-# service tag early: [payments] ...  (but must not be [ERROR] or [2026-...])
-RE_BRACKET_TAG = re.compile(r"^\s*\[(?P<tag>[A-Za-z0-9_.\-]{2,})\]\s*")
-
-# prefix "auth-service: message"
-RE_PREFIX_COLON = re.compile(r"^\s*(?P<svc>[A-Za-z0-9_.\-]{2,})\s*:\s+(?P<rest>.+)$")
-
-RE_SERVICE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{1,63}$")
-
-RE_EXCEPTIONISH = re.compile(
-    r"""(
-        \b\w+(?:Error|Exception)\b.*:   # FooError: message
+# Service in brackets: [auth-service[28]] or [web-gateway[34]] or db[postgres-15]
+RE_SERVICE_BRACKET = re.compile(
+    r"""
+    ^\s*
+    (?:\[[^\]]*\])?\s*                  # Optional timestamp bracket
+    (?:
+        # Format: [auth-service[28]]
+        \[
+            (?P<service_bracket>
+                [a-zA-Z][a-zA-Z0-9_-]+       # service name
+                (?:\[\d+\])?                  # optional [pid]
+            )
+        \]
         |
-        \b\w+(?:Error|Exception)\b$     # FooError
-    )""",
-    re.VERBOSE,
+        # Format: db[postgres-15] (no outer brackets)
+        (?P<service_db>
+            db
+        )
+        \[
+            (?P<db_instance>
+                [a-zA-Z][a-zA-Z0-9_-]+        # db instance name (postgres-15, mysql-8, etc)
+            )
+        \]
+    )
+    """,
+    re.VERBOSE
 )
 
-# Rough JSON line check
+# Service prefix with colon: auth-service[28]: message
+RE_SERVICE_COLON = re.compile(
+    r"""
+    ^\s*
+    (?P<service>[a-zA-Z][a-zA-Z0-9_.-]+)
+    (?:\[\d+\])?
+    \s*:\s*
+    """,
+    re.VERBOSE
+)
+
+# Level detection - enhanced for your formats
+RE_LEVEL = re.compile(
+    r"""
+    (?:
+        \[
+        \s*
+        (?P<level_bracket>INFO|WARN|WARNING|ERROR|DEBUG|TRACE|CRITICAL|FATAL)
+        \s*
+        \]
+        |
+        \s
+        (?P<level_prefix>INFO|WARN|WARNING|ERROR|DEBUG|TRACE|CRITICAL|FATAL)
+        \s
+        |
+        \b(?:level|severity|lvl)\s*=\s*(?P<level_kv>info|warn|warning|error|debug|trace|critical|fatal)
+        |
+        \s
+        (?P<level_standalone>INFO|WARN|WARNING|ERROR|DEBUG|TRACE|CRITICAL|FATAL)
+        (?=\s|$)
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+# req-id pattern for correlation
+RE_REQUEST_ID = re.compile(r'\[?(?:req-id|request-id|trace-id|span-id):?\s*([a-f0-9-]+)\]?', re.IGNORECASE)
+
+# User ID pattern
+RE_USER_ID = re.compile(r'user[:_]?(\w+)', re.IGNORECASE)
+
+# Exception patterns
+RE_EXCEPTION = re.compile(
+    r"""
+    ^\s*
+    (?:
+        (?:javax?\.)?[\w.]+(?:Exception|Error)  # Java exceptions
+        |
+        Traceback\s*\(most\s*recent\s*call\s*last\):  # Python traceback
+        |
+        Caused\s+by:                               # Caused by chains
+        |
+        \s+at\s+[\w$.]+\(                         # Stack trace lines
+    )
+    """,
+    re.VERBOSE
+)
+
+# HTTP status codes
+RE_HTTP_STATUS = re.compile(r'\b(HTTP[/\d]*\s+)?(?P<status>[45]\d{2})\b')
+
+# ----------------------------
+# Helper functions
+# ----------------------------
+
+def normalize_level(level: str) -> str:
+    """Normalize level to standard format"""
+    if not level:
+        return None
+    lvl = level.upper().strip('[] ')
+    mapping = {
+        'WARNING': 'WARN',
+        'FATAL': 'CRITICAL',
+        'TRACE': 'DEBUG'
+    }
+    return mapping.get(lvl, lvl)
+
 def looks_like_json_line(line: str) -> bool:
+    """Check if line looks like JSON"""
     t = line.strip()
-    return t.startswith("{") and (t.endswith("}") or t.endswith("},") or t.endswith("}]") or t.endswith("}]},") )
+    return (t.startswith('{') and t.endswith('}')) or \
+           (t.startswith('[') and t.endswith(']'))
 
+def is_stack_trace_line(line: str) -> bool:
+    """Detect stack trace lines"""
+    s = line.strip()
+    return (s.startswith('at ') or 
+            s.startswith('...') or 
+            s.startswith('Caused by:') or
+            s.startswith('Traceback') or
+            s.startswith('File "') or
+            re.match(r'\s+at\s+[\w$.]+\(', s))
 
-def is_continuation(line: str) -> bool:
-    """
-    Continuation lines should NOT start a new record.
-    Strong “glue” signals: indentation, stack trace patterns, blank lines.
-    """
-    s = line.rstrip("\n")
-    if s and s[0].isspace():
-        return True
-    if s.startswith("at "):  # Java stack
-        return True
-    if "Caused by:" in s:
-        return True
-    if s.startswith("Traceback"):  # Python
-        return True
-    if s.startswith('File "'):  # Python traceback lines
-        return True
-    if s.startswith("..."):
-        return True
-    return False
+def extract_from_json(raw: str) -> Optional[dict]:
+    """Extract fields from JSON log lines"""
+    lines = raw.splitlines()
+    json_obj = None
+    
+    # Try to find JSON in first line or as complete multiline JSON
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('{'):
+            # Accumulate until we have complete JSON
+            json_str = stripped
+            for next_line in lines[i+1:]:
+                if next_line.strip().startswith('}'):
+                    json_str += '\n' + next_line
+                    break
+                json_str += '\n' + next_line
+            try:
+                json_obj = json.loads(json_str)
+                break
+            except json.JSONDecodeError:
+                continue
+    
+    if json_obj:
+        return json_obj
+    return None
+
+def extract_timestamp(text: str) -> Tuple[Optional[str], str, float]:
+    """Extract timestamp from start of line"""
+    # Try bracket format first
+    m = RE_TIMESTAMP_BRACKET.match(text)
+    if m:
+        ts = m.group('ts')
+        rest = text[m.end():].lstrip()
+        return ts, rest, 0.95
+    
+    # Try plain timestamp
+    m = RE_TIMESTAMP.match(text)
+    if m:
+        ts = m.group('ts')
+        rest = text[m.end():].lstrip()
+        # Higher confidence if we have timezone or milliseconds
+        conf = 0.95 if 'Z' in ts or 'UTC' in ts or '.' in ts else 0.85
+        return ts, rest, conf
+    
+    return None, text, 0.0
+
+def extract_level(text: str) -> Tuple[Optional[str], str, float]:
+    """Extract log level from text"""
+    m = RE_LEVEL.search(text)
+    if m:
+        level = m.group('level_bracket') or m.group('level_prefix') or \
+                m.group('level_kv') or m.group('level_standalone')
+        if level:
+            # Remove the level from text for remaining message
+            if m.group('level_bracket'):
+                # Remove [LEVEL]
+                rest = text.replace(m.group(0), '', 1).lstrip()
+            else:
+                # Remove level and surrounding space
+                rest = re.sub(r'\s*' + re.escape(level) + r'\s*', ' ', text, 1).strip()
+            return normalize_level(level), rest, 0.9
+    
+    return None, text, 0.0
+
+def extract_service(text: str) -> Tuple[Optional[str], str, float]:
+    """Extract service name from text"""
+    # Try [service[pid]] or db[postgres-15] format
+    m = RE_SERVICE_BRACKET.search(text)
+    if m:
+        if m.group('service_bracket'):
+            service = m.group('service_bracket')
+            # Remove the [service[pid]] part
+            rest = re.sub(r'\[[^\]]*' + re.escape(service) + r'[^\]]*\]', '', text, 1).lstrip(' :')
+            rest = re.sub(r'^\s*:\s*', '', rest)
+            return service, rest, 0.9
+        
+        elif m.group('service_db'):
+            # Handle db[postgres-15] format - combine to "db:postgres-15" or just "db"
+            db_service = m.group('service_db')  # "db"
+            db_instance = m.group('db_instance')  # "postgres-15"
+            # Return as "db[postgres-15]" to preserve the format, or combine as "db:postgres-15"
+            service = f"{db_service}[{db_instance}]"  # or f"{db_service}:{db_instance}"
+            
+            # Remove the db[postgres-15] part from text
+            pattern = re.escape(db_service) + r'\[' + re.escape(db_instance) + r'\]'
+            rest = re.sub(pattern, '', text, 1).lstrip(' :')
+            rest = re.sub(r'^\s*:\s*', '', rest)
+            return service, rest, 0.95  # Higher confidence for this specific format
+    
+    # Try service: format
+    m = RE_SERVICE_COLON.match(text)
+    if m:
+        service = m.group('service')
+        rest = text[m.end():].lstrip()
+        return service, rest, 0.85
+    
+    return None, text, 0.0
+
+def extract_metadata(text: str) -> dict:
+    """Extract additional metadata like req-id, user-id, etc."""
+    metadata = {}
+    
+    # Extract request ID
+    req_match = RE_REQUEST_ID.search(text)
+    if req_match:
+        metadata['request_id'] = req_match.group(1)
+    
+    # Extract user ID
+    user_match = RE_USER_ID.search(text)
+    if user_match:
+        metadata['user_id'] = user_match.group(1)
+    
+    # Extract HTTP status
+    status_match = RE_HTTP_STATUS.search(text)
+    if status_match:
+        metadata['http_status'] = int(status_match.group('status'))
+    
+    return metadata
+
+def build_signature(record: dict, message: str) -> str:
+    """Build a signature for grouping similar logs"""
+    lines = record['raw'].splitlines()
+    
+    # For exceptions, use exception type + first line
+    if any(is_stack_trace_line(line) for line in lines):
+        # Find the exception line
+        for line in lines:
+            if 'Exception' in line or 'Error' in line and ':' in line:
+                return line.strip()
+        # Fall back to first line if we can't find exception
+        return lines[0].strip()
+    
+    # For normal logs, use message without dynamic parts
+    # Remove timestamps, IDs, etc.
+    signature = message
+    # Remove request IDs
+    signature = re.sub(r'[\[\(]?req-id:?\s*[a-f0-9-]+[\]\)]?', '', signature)
+    # Remove user IDs
+    signature = re.sub(r'user[:_]?\w+', 'user', signature)
+    # Remove order IDs
+    signature = re.sub(r'order[:_]?\w+', 'order', signature)
+    # Remove transaction IDs
+    signature = re.sub(r'txn[:_]?\w+', 'txn', signature)
+    # Clean up extra spaces
+    signature = re.sub(r'\s+', ' ', signature).strip()
+    
+    return signature[:300]
+
+# ----------------------------
+# Main parsing functions
+# ----------------------------
 
 def is_new_record(line: str) -> bool:
-    """
-    New-record signals (only if NOT a continuation).
-    We keep these broad; false positives are mitigated by continuation override.
-    """
-    if is_continuation(line):
+    """Determine if line starts a new log record"""
+    if is_stack_trace_line(line):
         return False
     
-
-    s = line.lstrip()
-
-    # Bracketed timestamp
-    if RE_TS_BRACKET.match(s):
+    stripped = line.lstrip()
+    
+    # JSON start
+    if looks_like_json_line(stripped):
         return True
-
-    # Timestamp at start
-    if RE_TS_PREFIX.match(s):
+    
+    # Has timestamp at start
+    if RE_TIMESTAMP.match(line) or RE_TIMESTAMP_BRACKET.match(line):
         return True
-
-    # Level prefix
-    if RE_LEVEL_PREFIX.match(s):
+    
+    # Has level at start (not in middle)
+    level_match = RE_LEVEL.match(stripped)
+    if level_match and level_match.start() == 0:
         return True
-
-    # JSON one-liner
-    if looks_like_json_line(s):
+    
+    # Has service prefix
+    if RE_SERVICE_BRACKET.search(line) and RE_TIMESTAMP.search(line):
         return True
-
+    
     return False
 
 def group_lines_into_record(lines: list[str]) -> list[list[str]]:
-    records: list[list[str]] = []
-    current_record: list[str] = []
+    """Group log lines into multi-line records"""
+    records = []
+    current = []
+    
     for line in lines:
-        if is_new_record(line):
-            if current_record:
-                records.append(current_record)
-                current_record = []
-            current_record = [line]
+        if not line.strip():
+            if current:
+                current.append(line)
+            continue
+            
+        if is_new_record(line) and current:
+            records.append(current)
+            current = [line]
         else:
-            current_record.append(line)
-    if current_record:
-        records.append(current_record)
+            current.append(line)
+    
+    if current:
+        records.append(current)
+    
     return records
 
-def first_nonempty_line(lines: list[str]) -> str:
-    for line in lines:
-        if line.strip():
-            return line
-    return ""
-
-def parse_json_record(raw: str) -> Optional[dict[str, Any]]:
-    header = first_nonempty_line(raw.splitlines())
-    candidate = header.strip()
-    if looks_like_json_line(candidate):
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
-            return None
-    return None
-
-def normalize_level(level: str) -> str:
-    lvl = level.upper()
-    return "WARN" if lvl == "WARNING" else lvl
-
-def extract_signature(raw: str, message: str) -> str:
-    lines = [ln.rstrip() for ln in raw.splitlines()]
-    non_empty = [ln.strip() for ln in lines if ln.strip()]
-    if not non_empty:
-        return message.strip()
-
-    if len(non_empty) == 1:
-        return message.strip() or non_empty[0]
-
-    # Exception/stacktrace path (keep as before)
-    picked: list[str] = []
-    caused = next((ln.strip() for ln in non_empty if "Caused by:" in ln), None)
-    if caused:
-        picked.append(caused)
-
-    exceptionish = next((ln for ln in reversed(lines)
-                        if RE_EXCEPTIONISH.search(ln.strip())), None)
-    
-    if exceptionish:
-        picked.append(exceptionish)
-
-    traceback = next((ln.strip() for ln in non_empty if ln.strip().startswith("Traceback")), None)
-    if traceback:
-        if non_empty[-1] not in picked: # might be the same as exceptionish, avoid duplication
-            picked.append(non_empty[-1])  # often the last line has the most relevant info in Python tracebacks
-
-    if picked:
-        # Include the top message too (optional but often helps)
-        top = message.strip()
-        if top and top not in picked:
-            picked.insert(0, top)
-        return " | ".join(picked)
-
-    # Non-exception multiline: if the message is “generic”, add first continuation hint
-    msg = (message or "").strip()
-    generic = (msg.endswith(":") or len(msg) < 18)
-    if generic:
-        # take up to 2 continuation lines that are indented (likely details)
-        cont = []
-        for ln in lines[1:]:
-            if ln.strip() and (ln[:1].isspace() or ln.startswith("\t")):
-                cont.append(ln.strip())
-            if len(cont) >= 2:
-                break
-        if cont:
-            return msg + " | " + " | ".join(cont)
-
-    return msg or non_empty[0]
-
-def extract_ts_from_header(header: str) -> tuple[Optional[str], str, float, list[str]]:
-    """
-    Returns (ts_str, remaining_text, confidence, matched_tags).
-    We keep ts as a string to be format-agnostic.
-    """
-    matched: list[str] = []
-
-    # [ts] prefix
-    m = RE_TS_BRACKET.match(header)
-    if m:
-        ts = m.group("ts").strip()
-        rest = header[m.end():].lstrip()
-        matched.append("ts:bracket")
-        return ts, rest, 0.95, matched
-
-    # direct ts prefix
-    m = RE_TS_PREFIX.match(header)
-    if m:
-        ts = m.group("ts").strip()
-        rest = header[m.end():].lstrip()
-        # Heuristic confidence: date-only is weaker than date+time
-        conf = 0.90 if re.search(r"\d{2}:\d{2}", ts) else 0.60
-        matched.append("ts:prefix")
-        return ts, rest, conf, matched
-
-    return None, header.strip(), 0.0, matched
-
-def extract_level_from_header(text: str) -> tuple[Optional[str], str, float, list[str]]:
-    matched: list[str] = []
-
-    m = RE_LEVEL_PREFIX.match(text)
-    if m:
-        lvl = normalize_level(m.group("level"))
-        rest = text[m.end():].lstrip()
-        matched.append("level:prefix")
-        return lvl, rest, 0.90, matched
-
-    m = RE_LEVEL_KV.search(text)
-    if m:
-        lvl = normalize_level(m.group("level"))
-        # we do NOT remove it from text (it might be mid-line)
-        matched.append("level:kv")
-        return lvl, text.strip(), 0.70, matched
-
-    return None, text.strip(), 0.0, matched
-
-def extract_service_from_header(text: str) -> tuple[Optional[str], str, float, list[str]]:
-    """
-    “Service” is ambiguous, so we only promote when we see strong cues.
-    """
-    matched: list[str] = []
-
-    m = RE_SERVICE_KV.search(text)
-    if m:
-        svc = m.group("svc")
-        matched.append("service:kv")
-        return svc, text.strip(), 0.85, matched
-
-    # bracket tag: [payments] ...
-    # but avoid [ERROR] and [2026-...]
-    m = RE_BRACKET_TAG.match(text)
-    if m:
-        tag = m.group("tag")
-        if not RE_LEVEL_PREFIX.match(f"[{tag}]") and not re.match(r"^\d{4}-\d{2}-\d{2}", tag):
-            rest = text[m.end():].lstrip()
-            matched.append("service:bracket_tag")
-            return tag, rest, 0.60, matched
-
-    # prefix colon: auth-service: message
-    m = RE_PREFIX_COLON.match(text)
-    if m:
-        svc = m.group("svc")
-        rest = m.group("rest").strip()
-        matched.append("service:prefix_colon")
-        return svc, rest, 0.65, matched
-
-    return None, text.strip(), 0.0, matched
-
-
-def peel_next_token_as_service(text: str) -> tuple[Optional[str], str, float, list[str]]:
-    """
-    If text begins with a service-like token, consume it and return it.
-    """
-    s = text.lstrip()
-    if not s:
-        return None, text.strip(), 0.0, []
-
-    # token is up to first whitespace
-    parts = s.split(None, 1)
-    token = parts[0]
-    rest = parts[1] if len(parts) == 2 else ""
-
-    if RE_SERVICE_TOKEN.match(token):
-        # avoid promoting obvious non-service tokens
-        if token.upper() in {"INFO", "WARN", "WARNING", "ERROR", "DEBUG", "TRACE", "CRITICAL", "FATAL", "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "CONNECT", "TRACE"}:
-            return None, text.strip(), 0.0, []
-        # avoid date-like token
-        if re.match(r"^\d{4}-\d{2}-\d{2}", token):
-            return None, text.strip(), 0.0, []
-        return token, rest.strip(), 0.70, ["service:next_token"]
-
-    return None, text.strip(), 0.0, []
-
-def build_message(header_rest: str, fallback_header: str) -> str:
-    msg = header_rest.strip() or fallback_header.strip()
-    if len(msg) > 300:
-        msg = msg[:300] + "…"
-    return msg
-
 def parse_record(record_lines: list[str]) -> dict[str, Any]:
-    raw = "\n".join(record_lines)
-    header = first_nonempty_line(record_lines)
-    record = {
-        "raw": raw,
-        "message": header,
-        "ts": None,
-        "ts_raw": None,
-        "service": None,
-        "level": None,
-        "attrs": {},
-        "parse": {"kind": "text", "confidence": 0.0, "matched": []},
+    """Parse a single log record"""
+    raw = '\n'.join(record_lines)
+    header = record_lines[0] if record_lines else ''
+    
+    result = {
+        'raw': raw,
+        'ts': None,
+        'ts_raw': None,
+        'service': None,
+        'level': None,
+        'message': '',
+        'attrs': {},
+        'metadata': {},
+        'parse': {'kind': 'text', 'confidence': 0.0}
     }
-
-    # First try JSON parsing
-    obj = parse_json_record(raw)
-    if obj is not None:
-        ts = obj.get("ts") or obj.get("time") or obj.get("timestamp") or obj.get("@timestamp") or obj.get("datetime")
-        level = obj.get("level") or obj.get("severity") or obj.get("log.level")
-        service = obj.get("service") or obj.get("service_name") or obj.get("app") or obj.get("component") or obj.get("logger") or obj.get("source")
-        msg = obj.get("message") or obj.get("msg") or obj.get("event") or header
     
-        record["ts_raw"] = str(ts) if ts is not None else None
+    # Try JSON parsing first
+    json_obj = extract_from_json(raw)
+    if json_obj:
+        # Extract common fields
+        ts = (json_obj.get('ts') or json_obj.get('time') or 
+              json_obj.get('timestamp') or json_obj.get('@timestamp'))
+        level = (json_obj.get('level') or json_obj.get('severity') or 
+                json_obj.get('log.level'))
+        service = (json_obj.get('service') or json_obj.get('svc') or 
+                  json_obj.get('app') or json_obj.get('component'))
+        msg = (json_obj.get('message') or json_obj.get('msg') or 
+               json_obj.get('event') or header)
+        
+        result['ts_raw'] = str(ts) if ts else None
         try:
-            record["ts"] = date_parser.parse(ts) if ts else None
-        except (ParserError, OverflowError):
-            record["ts"] = None
-        record["level"] = normalize_level(str(level)) if level is not None else None
-        record["service"] = str(service) if service is not None else None
-        record["message"] = str(msg).strip()[:300] + ("…" if len(str(msg).strip()) > 300 else "")
-        record["attrs"] = obj  # keep entire JSON as attrs
-        record["parse"] = {"kind": "json", "confidence": 0.95, "matched": ["json:loads"]}
-
-        record["signature"] = extract_signature(record["raw"], record["message"])
-        return record
+            result['ts'] = date_parser.parse(ts) if ts else None
+        except:
+            result['ts'] = None
+        
+        result['level'] = normalize_level(str(level)) if level else None
+        result['service'] = str(service) if service else None
+        result['message'] = str(msg).strip()[:500]
+        result['attrs'] = json_obj
+        result['parse'] = {'kind': 'json', 'confidence': 0.98}
+        result['signature'] = build_signature(result, result['message'])
+        
+        return result
     
-    # ---- TEXT peeling strategy: ts -> level -> service -> message
-    ts, rest, ts_conf, ts_tags = extract_ts_from_header(header)
-    lvl, rest2, lvl_conf, lvl_tags = extract_level_from_header(rest)
-    svc = None
-    svc_conf = 0.0
-    svc_tags: list[str] = []
-    rest3 = rest2
+    # Text parsing
+    text = header
+    matched = []
     
-    # docker-like heuristic: ts + level => next token is service
-    if ts_conf >= 0.85 and lvl_conf >= 0.85:
-        svc, rest3, svc_conf, svc_tags = peel_next_token_as_service(rest2)
-
-    # fallback to other service extractors if not found
-    if svc is None:
-        svc, rest3, svc_conf, svc_tags = extract_service_from_header(rest2)
-
-    record["ts_raw"] = ts
-    try:
-        record["ts"] = date_parser.parse(ts) if ts else None
-    except (ParserError, OverflowError):
-        record["ts"] = None
-    record["level"] = lvl
-    record["service"] = svc
-    record["message"] = build_message(rest3, header)
-
-    matched = ts_tags + lvl_tags + svc_tags
-    # overall confidence is a simple aggregate of the best signals we found
-    conf = max(ts_conf, 0.0) * 0.45 + max(lvl_conf, 0.0) * 0.35 + max(svc_conf, 0.0) * 0.20
-    record["parse"] = {"kind": "text", "confidence": round(conf, 3), "matched": matched}
-
-    record["signature"] = extract_signature(record["raw"], record["message"])
-    return record
+    # Extract timestamp
+    ts, text, ts_conf = extract_timestamp(text)
+    if ts:
+        result['ts_raw'] = ts
+        try:
+            result['ts'] = date_parser.parse(ts)
+        except:
+            result['ts'] = None
+        matched.append('timestamp')
+    
+    # Extract service
+    service, text, svc_conf = extract_service(text)
+    if service:
+        result['service'] = service
+        matched.append('service')
+    
+    # Extract level
+    level, text, lvl_conf = extract_level(text)
+    if level:
+        result['level'] = level
+        matched.append('level')
+    
+    # Extract metadata
+    result['metadata'] = extract_metadata(header)
+    
+    # Message is whatever's left
+    result['message'] = text.strip() or header
+    if len(result['message']) > 500:
+        result['message'] = result['message'][:500] + '…'
+    
+    # Calculate confidence
+    conf_weights = {'timestamp': 0.4, 'service': 0.3, 'level': 0.3}
+    confidence = sum(conf_weights.get(m, 0) for m in matched)
+    result['parse'] = {
+        'kind': 'text',
+        'confidence': round(confidence, 2),
+        'matched': matched
+    }
+    
+    result['signature'] = build_signature(result, result['message'])
+    
+    return result
 
 def parse_logs(logs: str) -> list[dict[str, Any]]:
+    """Parse a string of logs into structured records"""
     lines = logs.splitlines()
-    grouped = group_lines_into_record(lines)
-    return [parse_record(record) for record in grouped]
+    records = group_lines_into_record(lines)
+    return [parse_record(record) for record in records]

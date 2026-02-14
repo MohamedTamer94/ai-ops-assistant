@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../stores/auth'
 
@@ -8,34 +8,43 @@ import useAuthStore from '../stores/auth'
  */
 function useRequireAuth() {
   const navigate = useNavigate()
+  const token = useAuthStore((state) => state.token)
   const user = useAuthStore((state) => state.user)
   const loading = useAuthStore((state) => state.loading)
   const fetchMe = useAuthStore((state) => state.fetchMe)
+  const [checking, setChecking] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
+
     const checkAuth = async () => {
-      // If no user is loaded yet, try to fetch
-      if (!user && !loading) {
-        try {
-          await fetchMe()
-        } catch (err) {
-          // Auth failed, redirect to login
-          navigate('/login')
-        }
+      if (user) {
+        if (!cancelled) setChecking(false)
+        return
+      }
+
+      if (!token) {
+        navigate('/login', { replace: true })
+        return
+      }
+
+      if (loading) return
+
+      try {
+        await fetchMe()
+        if (!cancelled) setChecking(false)
+      } catch {
+        if (!cancelled) navigate('/login', { replace: true })
       }
     }
 
     checkAuth()
-  }, [])
-
-  // If not loading and still no user, redirect
-  useEffect(() => {
-    if (!loading && !user) {
-      navigate('/login')
+    return () => {
+      cancelled = true
     }
-  }, [user, loading])
+  }, [fetchMe, loading, navigate, token, user])
 
-  return { user, loading }
+  return { user, loading: loading || checking }
 }
 
 export default useRequireAuth

@@ -1,308 +1,452 @@
-import { useState, useRef } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { UploadCloud } from 'lucide-react'
 import { createIngestion, pasteIngestionLogs, uploadIngestionLogs } from '../lib/api'
 import useRequireAuth from '../hooks/useRequireAuth'
 import Toast from '../components/Toast'
-import { DEMO_DATASETS } from '../data/demoLogs'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import DEMO_TEMPLATES from '@/data/demoLogs'
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
-const ALLOWED_EXTENSIONS = ['.txt', '.log', '.jsonl', '.json']
+const MAX_FILE_SIZE = 20 * 1024 * 1024
+const MIN_LOG_CHARS = 50
+const MIN_LOG_LINES = 3
+const ACCEPTED_EXTENSIONS = ['.log', '.txt', '.json']
 
 function NewIngestionPage() {
   const { orgId, projectId } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const fileInputRef = useRef(null)
   useRequireAuth()
 
-  // Mode selection
-  const [mode, setMode] = useState('paste') // 'paste', 'upload', 'demo'
+  const initialMode = searchParams.get('mode')
+  const safeInitialMode = ['paste', 'file', 'demo'].includes(initialMode) ? initialMode : 'paste'
 
-  // Paste mode
-  const [logsText, setLogsText] = useState('')
-
-  // Upload mode
-  const fileInputRef = useRef(null)
-  const [uploadedFile, setUploadedFile] = useState(null)
-  const [fileError, setFileError] = useState('')
-
-  // Demo mode
-  const [selectedDemo, setSelectedDemo] = useState(DEMO_DATASETS[0]?.id)
-  const [demoPreview, setDemoPreview] = useState(DEMO_DATASETS[0]?.logs)
-
-  // Submission
+  const [step, setStep] = useState(1)
+  const [mode, setMode] = useState(safeInitialMode)
+  const [pasteText, setPasteText] = useState('')
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [filePreview, setFilePreview] = useState('')
+  const [dragOver, setDragOver] = useState(false)
+  const [selectedDemoId, setSelectedDemoId] = useState(DEMO_TEMPLATES[0].id)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
-  // Handle file selection
-  const handleFileSelect = (e) => {
-    const file = e.target.files?.[0]
+  const selectedDemo = useMemo(
+    () => DEMO_TEMPLATES.find((item) => item.id === selectedDemoId),
+    [selectedDemoId]
+  )
+
+  const pasteStats = useMemo(() => getTextStats(pasteText), [pasteText])
+  const demoStats = useMemo(() => getTextStats(selectedDemo?.logs || ''), [selectedDemo?.logs])
+  const fileStats = useMemo(() => getTextStats(filePreview), [filePreview])
+
+  const stepCanContinue = {
+    1: Boolean(mode),
+    2:
+      mode === 'paste'
+        ? isTextValid(pasteText)
+        : mode === 'file'
+          ? Boolean(selectedFile)
+          : Boolean(selectedDemo?.logs),
+    3: true,
+  }
+
+  const currentPayload = useMemo(() => {
+    if (mode === 'paste') return pasteText
+    if (mode === 'demo') return selectedDemo?.logs || ''
+    return filePreview
+  }, [mode, pasteText, selectedDemo?.logs, filePreview])
+
+  const goNextStep = () => {
+    setError('')
+    if (!stepCanContinue[step]) {
+      setError(getStepValidationMessage(step, mode, pasteText, selectedFile))
+      return
+    }
+    setStep((prev) => Math.min(prev + 1, 3))
+  }
+
+  const goPrevStep = () => {
+    setError('')
+    setStep((prev) => Math.max(prev - 1, 1))
+  }
+
+  const handleFileSelection = async (file) => {
+    setError('')
     if (!file) return
 
-    setFileError('')
-    // Check file size
+    const fileName = file.name.toLowerCase()
+    const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : ''
+    const isTextType = file.type.startsWith('text/')
+
+    if (!isTextType && !ACCEPTED_EXTENSIONS.includes(ext)) {
+      setSelectedFile(null)
+      setFilePreview('')
+      setError('Unsupported file type. Please upload .log, .txt, .json or text/*.')
+      return
+    }
+
     if (file.size > MAX_FILE_SIZE) {
-      setFileError(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum is 5MB.`)
-      setUploadedFile(null)
+      setSelectedFile(null)
+      setFilePreview('')
+      setError(`File is too large. Max size is ${formatBytes(MAX_FILE_SIZE)}.`)
       return
     }
 
-    // Check file type
-    const ext = '.' + file.name.split('.').pop().toLowerCase()
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      setFileError(`Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`)
-      setUploadedFile(null)
+    setSelectedFile(file)
+
+    try {
+      const content = await file.text()
+      setFilePreview(getFirstLines(content, 30))
+    } catch {
+      setFilePreview('')
+      setError('Could not read file preview.')
+    }
+  }
+
+  const onDrop = async (event) => {
+    event.preventDefault()
+    setDragOver(false)
+    const file = event.dataTransfer.files?.[0]
+    await handleFileSelection(file)
+  }
+
+  const onSubmit = async () => {
+    setError('')
+
+    if (!stepCanContinue[2]) {
+      setError(getStepValidationMessage(2, mode, pasteText, selectedFile))
+      setStep(2)
       return
-    }
-
-    // Keep the File object and let backend read it
-    setUploadedFile(file)
-  }
-
-  // Handle demo selection
-  const handleDemoSelect = (demoId) => {
-    const dataset = DEMO_DATASETS.find((d) => d.id === demoId)
-    if (dataset) {
-      setSelectedDemo(demoId)
-      setDemoPreview(dataset.logs)
-    }
-  }
-
-  // Handle submit
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setError(null)
-
-    let sourceType = mode === 'demo' ? 'paste' : mode;
-    let textToSubmit = ''
-
-    if (mode === 'paste') {
-      if (!logsText.trim() || logsText.trim().length < 10) {
-        setError('Please enter at least 10 characters of logs')
-        return
-      }
-      textToSubmit = logsText
-    } else if (mode === 'upload') {
-      if (!uploadedFile) {
-        setError('Please select and load a file')
-        return
-      }
-      // file will be uploaded to backend after creating ingestion
-    } else if (mode === 'demo') {
-      if (!demoPreview) {
-        setError('Please select a demo dataset')
-        return
-      }
-      textToSubmit = demoPreview
     }
 
     setLoading(true)
     try {
-      // Step 1: Create ingestion
+      // Backend currently accepts source_type: paste/upload/bundle.
+      // UI modes "file" and "demo" are mapped to valid backend source types.
+      const sourceType = mode === 'file' ? 'upload' : 'paste'
       const ingestion = await createIngestion(orgId, projectId, { source_type: sourceType })
 
-      // Step 2: Send logs to backend (either paste or upload)
-      if (mode === 'upload') {
-        await uploadIngestionLogs(orgId, projectId, ingestion.id, uploadedFile)
+      if (mode === 'file') {
+        try {
+          await uploadIngestionLogs(orgId, projectId, ingestion.id, selectedFile)
+        } catch (uploadErr) {
+          const status = uploadErr?.response?.status
+          if (status === 404 || status === 405) {
+            // Fallback if upload endpoint is unavailable.
+            const fullText = await selectedFile.text()
+            await pasteIngestionLogs(orgId, projectId, ingestion.id, fullText)
+          } else {
+            throw uploadErr
+          }
+        }
       } else {
-        await pasteIngestionLogs(orgId, projectId, ingestion.id, textToSubmit)
+        await pasteIngestionLogs(orgId, projectId, ingestion.id, currentPayload)
       }
 
-      // Step 3: Show success and redirect
-      setSuccessMessage('Ingestion created successfully!')
+      setSuccessMessage('Ingestion created. Processing started.')
       setTimeout(() => {
         navigate(`/app/orgs/${orgId}/projects/${projectId}/ingestions/${ingestion.id}`)
-      }, 1000)
+      }, 700)
     } catch (err) {
-      const msg = err.response?.data?.detail || err.message
-      if (err.response?.status === 413) {
-        setError('File or logs too large. Try a smaller file.')
-      } else if (err.response?.status === 401) {
-        setError('Please log in again')
-      } else if (err.response?.status === 403) {
-        setError("You don't have access")
-      } else {
-        setError(msg)
-      }
+      setError(err.response?.data?.detail || err.message || 'Failed to create ingestion.')
     } finally {
       setLoading(false)
     }
   }
 
-  const getLinesPreview = (text, lines = 30) => {
-    return text.split('\n').slice(0, lines).join('\n')
-  }
-
   return (
-    <div>
-      <div className="mb-4 xs:mb-6">
+    <div className="mx-auto w-full max-w-4xl space-y-6">
+      <div className="space-y-2">
         <Link
           to={`/app/orgs/${orgId}/projects/${projectId}/ingestions`}
-          className="text-blue-600 hover:text-blue-700 text-xs xs:text-sm"
+          className="inline-block text-sm text-muted-foreground hover:text-foreground"
         >
-          ← Back to Ingestions
+          Back to ingestions
         </Link>
+        <h1 className="text-2xl font-semibold tracking-tight">New Ingestion</h1>
+        <p className="text-sm text-muted-foreground">
+          Choose a source, provide logs, and start processing.
+        </p>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-4 xs:p-6 max-w-2xl">
-        <h2 className="text-xl xs:text-2xl font-bold text-gray-900 mb-6">Create Ingestion</h2>
-
-        {/* Mode selector */}
-        <div className="mb-6 flex gap-2 border-b border-gray-200">
-          {['paste', 'upload', 'demo'].map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`px-3 xs:px-4 py-2 xs:py-3 text-xs xs:text-sm font-medium transition border-b-2 ${
-                mode === m
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              {m.charAt(0).toUpperCase() + m.slice(1)}
-            </button>
-          ))}
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Paste Mode */}
-          {mode === 'paste' && (
-            <div>
-              <label htmlFor="logs" className="block text-xs xs:text-sm font-medium text-gray-700 mb-2">
-                Paste Logs
-              </label>
-              <textarea
-                id="logs"
-                value={logsText}
-                onChange={(e) => setLogsText(e.target.value)}
-                disabled={loading}
-                placeholder="Paste your logs here (minimum 10 characters)"
-                rows="10"
-                className="w-full px-3 py-2 text-xs xs:text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 font-mono"
-              />
-              <p className="text-gray-500 text-xs mt-2">{logsText.length} characters</p>
-            </div>
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base">Create Ingestion</CardTitle>
+          <CardDescription>Step {step} of 3</CardDescription>
+          <div className="flex flex-wrap items-center gap-2">
+            <StepBadge current={step} index={1} label="Source" />
+            <StepBadge current={step} index={2} label="Logs" />
+            <StepBadge current={step} index={3} label="Confirm" />
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {step === 1 && (
+            <section className="space-y-4">
+              <p className="text-sm font-medium">Step 1: Choose source type</p>
+              <Tabs value={mode} onValueChange={setMode}>
+                <TabsList className="w-full justify-start">
+                  <TabsTrigger value="paste">Paste</TabsTrigger>
+                  <TabsTrigger value="file">File</TabsTrigger>
+                  <TabsTrigger value="demo">Demo</TabsTrigger>
+                </TabsList>
+              </Tabs>
+              <div className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
+                {mode === 'paste' && 'Paste raw logs directly into a text area.'}
+                {mode === 'file' && 'Upload a local log file and preview it before submitting.'}
+                {mode === 'demo' && 'Use one of the built-in demo log scenarios.'}
+              </div>
+            </section>
           )}
 
-          {/* Upload Mode */}
-          {mode === 'upload' && (
-            <div>
-              <label className="block text-xs xs:text-sm font-medium text-gray-700 mb-2">
-                Upload Log File
-              </label>
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={handleFileSelect}
-                  disabled={loading}
-                  accept=".txt,.log,.jsonl,.json"
-                  className="hidden"
-                />
-                {uploadedFile ? (
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium text-gray-900">✓ File loaded</p>
-                    <p className="text-xs text-gray-600">{uploadedFile.name}</p>
-                    <p className="text-xs text-gray-500">{(uploadedFile.size / 1024).toFixed(1)} KB</p>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={loading}
-                      className="mt-2 text-blue-600 hover:text-blue-700 text-xs font-medium"
-                    >
-                      Choose different file
-                    </button>
+          {step === 2 && (
+            <section className="space-y-4">
+              <p className="text-sm font-medium">Step 2: Provide logs</p>
+
+              {mode === 'paste' && (
+                <div className="space-y-3">
+                  <textarea
+                    value={pasteText}
+                    onChange={(e) => setPasteText(e.target.value)}
+                    disabled={loading}
+                    rows={14}
+                    placeholder="Paste logs here..."
+                    className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none ring-offset-background focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+                  />
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant="outline">{pasteStats.chars} chars</Badge>
+                    <Badge variant="outline">{pasteStats.lines} lines</Badge>
+                    <span>Require at least {MIN_LOG_LINES} lines or {MIN_LOG_CHARS} chars.</span>
                   </div>
-                ) : (
-                  <div>
-                    <p className="text-sm text-gray-600 mb-3">
-                      Drag and drop a file, or click to select
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={loading}
-                      className="inline-block px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded text-xs font-medium transition disabled:bg-gray-100 disabled:text-gray-400"
-                    >
-                      Select File
-                    </button>
-                    <p className="text-xs text-gray-500 mt-2">Allowed: .txt, .log, .json, .jsonl (max 5MB)</p>
-                  </div>
-                )}
-              </div>
-              {fileError && (
-                <div className="mt-2 p-2 xs:p-3 bg-red-50 border border-red-200 text-red-700 rounded text-xs">
-                  {fileError}
                 </div>
               )}
-            </div>
+
+              {mode === 'file' && (
+                <div className="space-y-3">
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      setDragOver(true)
+                    }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={onDrop}
+                    className={`rounded-lg border-2 border-dashed p-6 text-center transition ${
+                      dragOver ? 'border-primary bg-primary/5' : 'border-border'
+                    }`}
+                  >
+                    <UploadCloud className="mx-auto h-8 w-8 text-muted-foreground" />
+                    <p className="mt-2 text-sm">Drag and drop a file, or pick one</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Accepts .log, .txt, .json and text/*
+                    </p>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      accept=".log,.txt,.json,text/*"
+                      onChange={(e) => handleFileSelection(e.target.files?.[0])}
+                      disabled={loading}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="mt-4"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={loading}
+                    >
+                      Choose file
+                    </Button>
+                  </div>
+
+                  {selectedFile && (
+                    <div className="rounded-md border bg-muted/20 p-3 text-sm">
+                      <p className="font-medium">{selectedFile.name}</p>
+                      <p className="text-xs text-muted-foreground">{formatBytes(selectedFile.size)}</p>
+                    </div>
+                  )}
+
+                  {selectedFile && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Preview (first 30 lines)
+                      </p>
+                      <textarea
+                        readOnly
+                        value={filePreview}
+                        rows={10}
+                        className="w-full rounded-md border bg-muted/20 px-3 py-2 font-mono text-xs"
+                      />
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <Badge variant="outline">{fileStats.chars} chars</Badge>
+                        <Badge variant="outline">{fileStats.lines} lines</Badge>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {mode === 'demo' && (
+                <div className="space-y-3">
+                  <label htmlFor="demo-template" className="text-sm font-medium">
+                    Demo scenario
+                  </label>
+                  <select
+                    id="demo-template"
+                    value={selectedDemoId}
+                    onChange={(e) => setSelectedDemoId(e.target.value)}
+                    disabled={loading}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+                  >
+                    {DEMO_TEMPLATES.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <textarea
+                    readOnly
+                    value={selectedDemo?.logs || ''}
+                    rows={12}
+                    className="w-full rounded-md border bg-muted/20 px-3 py-2 font-mono text-xs"
+                  />
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant="outline">{demoStats.chars} chars</Badge>
+                    <Badge variant="outline">{demoStats.lines} lines</Badge>
+                  </div>
+                </div>
+              )}
+            </section>
           )}
 
-          {/* Demo Mode */}
-          {mode === 'demo' && (
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="demo-select" className="block text-xs xs:text-sm font-medium text-gray-700 mb-2">
-                  Choose Demo Dataset
-                </label>
-                <select
-                  id="demo-select"
-                  value={selectedDemo}
-                  onChange={(e) => handleDemoSelect(e.target.value)}
-                  disabled={loading}
-                  className="w-full px-3 py-2 text-xs xs:text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                >
-                  {DEMO_DATASETS.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  {DEMO_DATASETS.find((d) => d.id === selectedDemo)?.description}
-                </p>
+          {step === 3 && (
+            <section className="space-y-4">
+              <p className="text-sm font-medium">Step 3: Confirm + submit</p>
+              <div className="rounded-lg border bg-muted/20 p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <SummaryItem label="Mode" value={mode} />
+                  <SummaryItem
+                    label="Source type (API)"
+                    value={mode === 'file' ? 'upload' : 'paste'}
+                  />
+                  <SummaryItem
+                    label="Characters"
+                    value={String(getTextStats(currentPayload).chars)}
+                  />
+                  <SummaryItem
+                    label="Lines"
+                    value={String(getTextStats(currentPayload).lines)}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs xs:text-sm font-medium text-gray-700 mb-2">
-                  Preview (first 30 lines)
-                </label>
-                <pre className="w-full px-3 py-2 text-xs border border-gray-300 rounded-md bg-gray-50 overflow-x-auto max-h-64 font-mono whitespace-pre-wrap break-words">
-                  {getLinesPreview(demoPreview, 30)}
-                </pre>
-              </div>
-            </div>
+              {loading && (
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              )}
+            </section>
           )}
 
           {error && (
-            <div className="p-2 xs:p-3 bg-red-50 border border-red-200 text-red-700 rounded text-xs xs:text-sm">
+            <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
               {error}
             </div>
           )}
 
-          <div className="flex flex-col xs:flex-row gap-2 xs:gap-3 pt-4">
-            <button
-              type="submit"
-              disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded text-xs xs:text-base transition whitespace-nowrap flex items-center justify-center gap-2"
-            >
-              {loading && <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>}
-              <span>{loading ? 'Creating...' : 'Create Ingestion'}</span>
-            </button>
-            <Link
-              to={`/app/orgs/${orgId}/projects/${projectId}/ingestions`}
-              className="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition text-xs xs:text-base text-center"
-            >
-              Cancel
-            </Link>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+            <Button type="button" variant="outline" onClick={goPrevStep} disabled={step === 1 || loading}>
+              Back
+            </Button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button asChild variant="ghost" disabled={loading}>
+                <Link to={`/app/orgs/${orgId}/projects/${projectId}/ingestions`}>Cancel</Link>
+              </Button>
+              {step < 3 ? (
+                <Button type="button" onClick={goNextStep} disabled={loading}>
+                  Continue
+                </Button>
+              ) : (
+                <Button type="button" onClick={onSubmit} disabled={loading}>
+                  {loading ? 'Creating ingestion...' : 'Create ingestion'}
+                </Button>
+              )}
+            </div>
           </div>
-        </form>
-      </div>
+        </CardContent>
+      </Card>
 
       {successMessage && (
-        <Toast message={successMessage} type="success" onClose={() => setSuccessMessage('')} autoClose={2000} />
+        <Toast
+          message={successMessage}
+          type="success"
+          onClose={() => setSuccessMessage('')}
+          autoClose={2200}
+        />
       )}
     </div>
   )
+}
+
+function SummaryItem({ label, value }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-sm font-medium capitalize">{value || '-'}</p>
+    </div>
+  )
+}
+
+function StepBadge({ current, index, label }) {
+  const active = current === index
+  const done = current > index
+  return (
+    <Badge variant={active ? 'default' : 'outline'}>
+      {done ? `Done: ${label}` : `${index}. ${label}`}
+    </Badge>
+  )
+}
+
+function getTextStats(text) {
+  const value = String(text || '')
+  const chars = value.trim().length
+  const lines = value.trim() ? value.trim().split(/\r?\n/).length : 0
+  return { chars, lines }
+}
+
+function isTextValid(text) {
+  const stats = getTextStats(text)
+  return stats.lines >= MIN_LOG_LINES || stats.chars >= MIN_LOG_CHARS
+}
+
+function getStepValidationMessage(step, mode, pasteText, selectedFile) {
+  if (step !== 2) return 'Please complete this step.'
+  if (mode === 'paste' && !isTextValid(pasteText)) {
+    return `Paste logs must include at least ${MIN_LOG_LINES} lines or ${MIN_LOG_CHARS} characters.`
+  }
+  if (mode === 'file' && !selectedFile) {
+    return 'Please upload a file before continuing.'
+  }
+  return ''
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function getFirstLines(text, lineCount) {
+  return String(text || '').split(/\r?\n/).slice(0, lineCount).join('\n')
 }
 
 export default NewIngestionPage

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -14,11 +14,13 @@ from app.tasks.ingestion_processing import process_ingestion
 from app.models.ai_analysis import AiAnalysis
 from app.utils.ai_insights import generate_insights as generate_insights_util
 from app.crud.ai_analyses import create_ai_analysis, find_ai_analysis
+from app.security.rate_limit import limiter
 
 router = APIRouter()
 
 @router.post("/")
-def create_ingestion(org_id: str, project_id: str, payload: IngestionCreateRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@limiter.limit("30/minute")
+def create_ingestion(request: Request, org_id: str, project_id: str, payload: IngestionCreateRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -29,7 +31,8 @@ def create_ingestion(org_id: str, project_id: str, payload: IngestionCreateReque
     return {"id": ingestion.id, "project_id": ingestion.project_id, "source_type": ingestion.source_type, "status": ingestion.status}
 
 @router.post("/{ingestion_id}/logs/paste")
-def paste_logs(org_id: str, project_id: str, ingestion_id: str, payload: IngestionPasteLogsRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@limiter.limit("30/minute")
+def paste_logs(request: Request, org_id: str, project_id: str, ingestion_id: str, payload: IngestionPasteLogsRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -44,7 +47,8 @@ def paste_logs(org_id: str, project_id: str, ingestion_id: str, payload: Ingesti
     return {"message": "Logs saved successfully."}
 
 @router.post("/{ingestion_id}/logs/upload")
-def upload_logs(org_id: str, project_id: str, ingestion_id: str, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@limiter.limit("30/minute")
+def upload_logs(request: Request, org_id: str, project_id: str, ingestion_id: str, file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -60,7 +64,8 @@ def upload_logs(org_id: str, project_id: str, ingestion_id: str, file: UploadFil
     return {"message": "Logs uploaded and saved successfully."}
     
 @router.get("/{ingestion_id}")
-def get_ingestion(org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@limiter.limit("60/minute")
+def get_ingestion(request: Request, org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -70,7 +75,8 @@ def get_ingestion(org_id: str, project_id: str, ingestion_id: str, db: Session =
     return {"id": ingestion.id, "project_id": ingestion.project_id, "source_type": ingestion.source_type, "status": ingestion.status}
 
 @router.get("/{ingestion_id}/overview")
-def get_ingestion_overview(org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@limiter.limit("60/minute")
+def get_ingestion_overview(request: Request, org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -107,7 +113,8 @@ def get_ingestion_overview(org_id: str, project_id: str, ingestion_id: str, db: 
     }    
 
 @router.get("/{ingestion_id}/groups")
-def get_ingestion_groups(org_id: str, project_id: str, ingestion_id: str, offset: int = 0, limit: int = 10, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@limiter.limit("60/minute")
+def get_ingestion_groups(request: Request, org_id: str, project_id: str, ingestion_id: str, offset: int = 0, limit: int = 10, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -121,7 +128,8 @@ def get_ingestion_groups(org_id: str, project_id: str, ingestion_id: str, offset
     return {"items": page, "next_offset": next_offset, "has_more": has_more}
 
 @router.get("/")
-def list_ingestions(org_id: str, project_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@limiter.limit("60/minute")
+def list_ingestions(request: Request, org_id: str, project_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -131,8 +139,9 @@ def list_ingestions(org_id: str, project_id: str, db: Session = Depends(get_db),
     ingestions = get_ingestions_for_project(db, project_id=project.id)
     return [{"id": ingestion.id, "project_id": ingestion.project_id, "source_type": ingestion.source_type, "status": ingestion.status} for ingestion in ingestions]
 
+@limiter.limit("60/minute")
 @router.get("/{ingestion_id}/events")
-def get_ingestion_events(org_id: str, project_id: str, ingestion_id: str, 
+def get_ingestion_events(request: Request, org_id: str, project_id: str, ingestion_id: str, 
                          cursor: int = 0, limit: int = Query(100, gt=0, le=500), 
                          levels: Optional[str] = Query(None), service: Optional[str] = Query(None), 
                          fingerprint: Optional[str] = Query(None), ts_from: Optional[datetime] = Query(None), 
@@ -151,7 +160,8 @@ def get_ingestion_events(org_id: str, project_id: str, ingestion_id: str,
     return {"items": [serialize_log(event) for event in page], "next_cursor": next_cursor, "has_more": has_more}
 
 @router.get("/{ingestion_id}/findings")
-def get_ingestion_findings(org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@limiter.limit("60/minute")
+def get_ingestion_findings(request: Request, org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -161,8 +171,9 @@ def get_ingestion_findings(org_id: str, project_id: str, ingestion_id: str, db: 
     findings = ingestion.findings or []
     return {"count": len(findings), "items": findings}
 
+@limiter.limit("60/minute")
 @router.get("/{ingestion_id}/findings/{finding_id}")
-def get_ingestion_finding_details(org_id: str, project_id: str, ingestion_id: str, finding_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def get_ingestion_finding_details(request: Request, org_id: str, project_id: str, ingestion_id: str, finding_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -179,9 +190,9 @@ def get_ingestion_finding_details(org_id: str, project_id: str, ingestion_id: st
         "evidence_preview": finding["evidence_preview"],
         "insight": insight_result,
     }
-
+@limiter.limit("60/minute")
 @router.get("/{ingestion_id}/groups/{fingerprint}")
-def get_ingestion_group_details(org_id: str, project_id: str, ingestion_id: str, fingerprint: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def get_ingestion_group_details(request: Request, org_id: str, project_id: str, ingestion_id: str, fingerprint: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -209,8 +220,9 @@ def get_ingestion_group_details(org_id: str, project_id: str, ingestion_id: str,
         "insight": insight_result,
     }
 
+@limiter.limit("20/minute")
 @router.post("/{ingestion_id}/insights")
-def generate_insights(payload: InsightGenRequest, org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def generate_insights(request: Request, payload: InsightGenRequest, org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")
@@ -232,8 +244,9 @@ def generate_insights(payload: InsightGenRequest, org_id: str, project_id: str, 
     create_ai_analysis(db, ingestion_id=ingestion.id, scope_type=payload.scope_type, scope_id=payload.fingerprint or payload.finding_id, result=result)
     return {"insight": result}
 
+@limiter.limit("60/minute")
 @router.delete("/{ingestion_id}")
-def delete_ingestion_endpoint(org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def delete_ingestion_endpoint(request: Request, org_id: str, project_id: str, ingestion_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     org_membership = require_org_member(db, org_id, current_user.id)
     if not org_membership:
         raise HTTPException(status_code=403, detail="Not a member of this organization")

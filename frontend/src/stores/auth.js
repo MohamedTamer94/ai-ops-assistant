@@ -42,13 +42,25 @@ const useAuthStore = create((set, get) => ({
   },
 
   fetchMe: async () => {
+    const token = get().token || localStorage.getItem('token')
+    if (!token) {
+      set({ user: null, loading: false, error: 'Not authenticated' })
+      throw new Error('Not authenticated')
+    }
+
     set({ loading: true, error: null })
     try {
       const userData = await apiMe()
       set({ user: userData })
       return userData
     } catch (error) {
-      set({ error: error.message })
+      if (error?.response?.status !== 200) {
+        localStorage.removeItem('token')
+        delete api.defaults.headers.common['Authorization']
+        set({ token: null, user: null, error: 'Session expired. Please sign in again.' })
+      } else {
+        set({ error: error.message })
+      }
       throw error
     } finally {
       set({ loading: false })
@@ -57,6 +69,7 @@ const useAuthStore = create((set, get) => ({
 
   logout: () => {
     localStorage.removeItem('token')
+    sessionStorage.removeItem('token')
     delete api.defaults.headers.common['Authorization']
     set({ token: null, user: null })
   },

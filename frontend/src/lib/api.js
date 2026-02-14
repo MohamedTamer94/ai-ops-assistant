@@ -9,6 +9,8 @@ export const api = axios.create({
   },
 })
 
+let handlingUnauthorized = false
+
 // Add token to requests if available
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
@@ -17,6 +19,27 @@ api.interceptors.request.use((config) => {
   }
   return config
 })
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      localStorage.removeItem('token')
+      delete api.defaults.headers.common['Authorization']
+
+      if (
+        !handlingUnauthorized &&
+        typeof window !== 'undefined' &&
+        window.location.pathname !== '/login'
+      ) {
+        handlingUnauthorized = true
+        window.location.replace('/login')
+      }
+    }
+
+    return Promise.reject(error)
+  }
+)
 
 export const login = async (email, password) => {
   const formData = new URLSearchParams()
@@ -42,6 +65,11 @@ export const register = async (name, email, password) => {
 
 export const me = async () => {
   const response = await api.get('/auth/me')
+  return response.data
+}
+
+export const createOrganization = async (name) => {
+  const response = await api.post('/orgs/', { name })
   return response.data
 }
 
@@ -116,6 +144,14 @@ export const getIngestionFindings = async (orgId, projectId, ingestionId) => {
 export const getGroupOverview = async (orgId, projectId, ingestionId, fingerprint) => {
   const response = await api.get(
     `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/groups/${fingerprint}`
+  )
+  return response.data
+}
+
+export const listIngestionGroups = async (orgId, projectId, ingestionId, params = {}) => {
+  const response = await api.get(
+    `/orgs/${orgId}/projects/${projectId}/ingestions/${ingestionId}/groups`,
+    { params }
   )
   return response.data
 }

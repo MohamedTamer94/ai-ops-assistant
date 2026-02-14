@@ -1,35 +1,112 @@
+name: aiops-backend
+
 services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_USER: ${POSTGRES_USER:-aiops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aiops}
       POSTGRES_DB: ${POSTGRES_DB:-aiops}
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-aiops}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aiops} -d ${POSTGRES_DB:-aiops}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   redis:
     image: redis:7
-    ports:
-      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redisdata:/data
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      ENV: docker
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/${POSTGRES_DB:-aiops}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-prod}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-60}
+      GROQ_API_KEY: ${GROQ_API_KEY:-replace-me}
+      GROQ_LLM_MODEL: ${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["http://localhost:5173"]}
+      CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS:-["GET","POST","PUT","DELETE"]}
+      STORAGE_DIR: /app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      ENV: docker
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/${POSTGRES_DB:-aiops}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-prod}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-60}
+      GROQ_API_KEY: ${GROQ_API_KEY:-replace-me}
+      GROQ_LLM_MODEL: ${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["http://localhost:5173"]}
+      CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS:-["GET","POST","PUT","DELETE"]}
+      STORAGE_DIR: /app/storage
+    volumes:
+      - backend_storage:/app/storage
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "app.celery_worker.celery", "worker", "--loglevel=info"]
+    environment:
+      ENV: docker
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/${POSTGRES_DB:-aiops}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-prod}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-60}
+      GROQ_API_KEY: ${GROQ_API_KEY:-replace-me}
+      GROQ_LLM_MODEL: ${GROQ_LLM_MODEL:-llama-3.3-70b-versatile}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-["http://localhost:5173"]}
+      CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS:-["GET","POST","PUT","DELETE"]}
+      STORAGE_DIR: /app/storage
+    volumes:
+      - backend_storage:/app/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:
   redisdata:
+  backend_storage:

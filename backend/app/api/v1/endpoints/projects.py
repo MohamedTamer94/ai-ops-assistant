@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -6,11 +6,14 @@ from app.dependencies.auth_dependencies import get_current_user
 from app.schemas.projects import ProjectCreateRequest
 from app.crud.projects import create_project as create_project_crud, get_projects_by_org, delete_project as delete_project_crud
 from app.crud.organizations import get_membership, require_org_admin
+from app.security.rate_limit import limiter
 
 router = APIRouter()
 
 @router.post("/")
+@limiter.limit("60/minute")
 def create_project(
+    request: Request,
     org_id: str,
     project: ProjectCreateRequest,
     current_user=Depends(get_current_user),
@@ -26,7 +29,9 @@ def create_project(
     return {"id": db_project.id, "name": db_project.name, "org_id": db_project.org_id}
 
 @router.get("/")
+@limiter.limit("100/minute")
 def list_projects(
+    request: Request,
     org_id: str,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -39,7 +44,9 @@ def list_projects(
     return [{"id": p.id, "name": p.name, "org_id": p.org_id} for p in projects]
 
 @router.delete("/{project_id}")
+@limiter.limit("60/minute")
 def delete_project(
+    request: Request,
     project_id: str,
     org_id: str,
     current_user=Depends(get_current_user),

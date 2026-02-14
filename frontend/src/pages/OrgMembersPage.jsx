@@ -1,276 +1,432 @@
-import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { listOrgMembers, inviteOrgMember, updateOrgMemberRole, removeOrgMember } from '../lib/api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { MoreHorizontal, UserPlus } from 'lucide-react'
+import {
+  inviteOrgMember,
+  listOrgMembers,
+  removeOrgMember,
+  updateOrgMemberRole,
+} from '../lib/api'
 import useRequireAuth from '../hooks/useRequireAuth'
-import Container from '../components/Container'
-import ConfirmDialog from '../components/ConfirmDialog'
 import Toast from '../components/Toast'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 function OrgMembersPage() {
   const { orgId } = useParams()
-  const { user, loading: authLoading } = useRequireAuth()
+  const { user } = useRequireAuth()
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
-
-  // Invite modal
-  const [showInviteModal, setShowInviteModal] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('member')
-  const [inviting, setInviting] = useState(false)
   const [inviteError, setInviteError] = useState('')
-
-  // Remove confirmation
-  const [removeConfirm, setRemoveConfirm] = useState({ open: false, userId: null, email: null })
+  const [inviting, setInviting] = useState(false)
+  const [updatingUserId, setUpdatingUserId] = useState('')
+  const [removeDialog, setRemoveDialog] = useState({ open: false, userId: '', email: '' })
   const [removing, setRemoving] = useState(false)
+  const [toast, setToast] = useState({ show: false, text: '', type: 'success' })
 
-  // Role change
-  const [roleChanging, setRoleChanging] = useState(null)
+  const currentMember = useMemo(
+    () => members.find((member) => member.user_id === user?.id),
+    [members, user?.id]
+  )
 
-  // Toast
-  const [message, setMessage] = useState({ show: false, text: '', type: 'success' })
+  const canManage = isAdmin || currentMember?.role === 'admin'
 
-  useEffect(() => {
-    fetchMembers()
-  }, [orgId])
-
-  const fetchMembers = async () => {
+  const fetchMembers = useCallback(async () => {
     setLoading(true)
-    setError(null)
+    setError('')
     try {
       const response = await listOrgMembers(orgId)
-      const membersList = response.items || response
-      setMembers(membersList)
-
-      // Check if current user is admin
+      const items = Array.isArray(response) ? response : response?.items || []
+      setMembers(items)
       if (user) {
-        const currentUserMembership = membersList.find((m) => m.user_id === user.id)
-        setIsAdmin(currentUserMembership?.role === 'admin')
+        const mine = items.find((item) => item.user_id === user.id)
+        setIsAdmin(mine?.role === 'admin')
       }
     } catch (err) {
       if (err.response?.status === 403) {
-        setError('Access denied')
-        setIsAdmin(false)
+        setError('Admin role required to manage members in this workspace.')
       } else {
-        setError(err.response?.data?.detail || err.message)
+        setError(err.response?.data?.detail || err.message || 'Failed to load members.')
       }
+      setMembers([])
+      setIsAdmin(false)
     } finally {
       setLoading(false)
     }
-  }
+  }, [orgId, user])
 
-  const handleInviteMember = async (e) => {
-    e.preventDefault()
-    if (!inviteEmail.trim()) {
-      setInviteError('Email is required')
+  useEffect(() => {
+    fetchMembers()
+  }, [fetchMembers])
+
+  const handleInvite = async () => {
+    setInviteError('')
+    if (!isValidEmail(inviteEmail)) {
+      setInviteError('Enter a valid email.')
       return
     }
 
     setInviting(true)
-    setInviteError('')
     try {
-      await inviteOrgMember(orgId, { email: inviteEmail, role: inviteRole })
+      await inviteOrgMember(orgId, { email: inviteEmail.trim(), role: inviteRole })
+      setInviteOpen(false)
       setInviteEmail('')
       setInviteRole('member')
-      setShowInviteModal(false)
-      setMessage({ show: true, text: 'Member invited successfully', type: 'success' })
+      setToast({ show: true, text: 'Invitation sent successfully.', type: 'success' })
       fetchMembers()
     } catch (err) {
-      const msg = err.response?.data?.detail || err.message
-      setInviteError(msg)
+      setInviteError(err.response?.data?.detail || err.message || 'Failed to invite member.')
     } finally {
       setInviting(false)
     }
   }
 
-  const handleUpdateRole = async (userId, newRole) => {
-    setRoleChanging(userId)
+  const handleRoleToggle = async (member) => {
+    if (!canManage) return
+    const newRole = member.role === 'admin' ? 'member' : 'admin'
+    setUpdatingUserId(member.user_id)
     try {
-      await updateOrgMemberRole(orgId, userId, newRole)
-      setMembers(members.map((m) => (m.user_id === userId ? { ...m, role: newRole } : m)))
-      setMessage({ show: true, text: 'Role updated successfully', type: 'success' })
+      await updateOrgMemberRole(orgId, member.user_id, newRole)
+      setMembers((prev) =>
+        prev.map((item) =>
+          item.user_id === member.user_id ? { ...item, role: newRole } : item
+        )
+      )
+      setToast({ show: true, text: 'Member role updated.', type: 'success' })
     } catch (err) {
-      const msg = err.response?.data?.detail || err.message
-      setMessage({ show: true, text: msg, type: 'error' })
+      setToast({
+        show: true,
+        text: err.response?.data?.detail || err.message || 'Failed to update role.',
+        type: 'error',
+      })
     } finally {
-      setRoleChanging(null)
+      setUpdatingUserId('')
     }
   }
 
-  const handleRemoveMember = async () => {
-    setRemoveConfirm({ open: false, userId: null, email: null })
+  const handleRemove = async () => {
+    if (!removeDialog.userId) return
     setRemoving(true)
     try {
-      await removeOrgMember(orgId, removeConfirm.userId)
-      setMembers(members.filter((m) => m.user_id !== removeConfirm.userId))
-      setMessage({ show: true, text: 'Member removed successfully', type: 'success' })
+      await removeOrgMember(orgId, removeDialog.userId)
+      setMembers((prev) => prev.filter((item) => item.user_id !== removeDialog.userId))
+      setToast({ show: true, text: 'Member removed.', type: 'success' })
     } catch (err) {
-      const msg = err.response?.data?.detail || err.message
-      setMessage({ show: true, text: msg, type: 'error' })
+      setToast({
+        show: true,
+        text: err.response?.data?.detail || err.message || 'Failed to remove member.',
+        type: 'error',
+      })
     } finally {
       setRemoving(false)
+      setRemoveDialog({ open: false, userId: '', email: '' })
     }
+  }
+
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="space-y-3 p-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
+      )
+    }
+
+    if (error) {
+      return (
+        <CardContent className="space-y-4 p-6">
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            {error}
+          </div>
+          <Button variant="outline" onClick={fetchMembers}>
+            Retry
+          </Button>
+        </CardContent>
+      )
+    }
+
+    if (members.length === 0) {
+      return (
+        <CardContent className="space-y-4 p-10 text-center">
+          <p className="text-sm text-muted-foreground">
+            No members found for this organization.
+          </p>
+          <Button
+            onClick={() => setInviteOpen(true)}
+            disabled={!canManage}
+            title={canManage ? '' : 'Admin only'}
+          >
+            <UserPlus className="h-4 w-4" />
+            Invite Member
+          </Button>
+        </CardContent>
+      )
+    }
+
+    return (
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Joined</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {members.map((member) => {
+              const isSelf = member.user_id === user?.id
+              const actionDisabled = !canManage || isSelf || updatingUserId === member.user_id
+              const disableReason = !canManage
+                ? 'Admin only'
+                : isSelf
+                  ? "You can't remove yourself."
+                  : ''
+
+              return (
+                <TableRow key={member.user_id}>
+                  <TableCell className="font-medium">{member.name || '-'}</TableCell>
+                  <TableCell className="max-w-[280px] truncate">{member.email}</TableCell>
+                  <TableCell>
+                    <Badge variant={member.role === 'admin' ? 'default' : 'secondary'}>
+                      {member.role}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {member.joined_at ? formatDate(member.joined_at) : '-'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          disabled={!canManage}
+                          title={canManage ? '' : 'Admin only'}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          disabled={actionDisabled}
+                          title={disableReason}
+                          onClick={() => handleRoleToggle(member)}
+                        >
+                          {member.role === 'admin' ? 'Demote to Member' : 'Promote to Admin'}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={actionDisabled}
+                          title={disableReason}
+                          className="text-destructive focus:text-destructive"
+                          onClick={() =>
+                            setRemoveDialog({
+                              open: true,
+                              userId: member.user_id,
+                              email: member.email,
+                            })
+                          }
+                        >
+                          Remove
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </CardContent>
+    )
   }
 
   return (
-    <Container>
-      <div>
-        {/* Back link and title */}
-        <div className="mb-6 xs:mb-8 flex flex-col xs:flex-row xs:justify-between xs:items-center gap-3 xs:gap-0">
-          <div>
-            <Link to={`/app/orgs/${orgId}/projects`} className="text-blue-600 hover:text-blue-700 text-xs xs:text-sm">
-              ← Back to Projects
-            </Link>
-            <h2 className="text-xl xs:text-2xl font-bold text-gray-900 mt-3 xs:mt-0">Organization Members</h2>
-          </div>
-          {isAdmin && (
-            <button
-              onClick={() => setShowInviteModal(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded text-xs xs:text-base transition whitespace-nowrap"
-            >
-              + Invite Member
-            </button>
-          )}
+    <div className="mx-auto w-full max-w-6xl space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <Link
+            to={`/app/orgs/${orgId}/projects`}
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Back to projects
+          </Link>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Members</h1>
+          <p className="text-sm text-muted-foreground">
+            Manage who can access this organization.
+          </p>
         </div>
-
-        {error && (
-          <div className="p-3 xs:p-4 mb-4 xs:mb-6 bg-red-50 border border-red-200 text-red-700 rounded text-xs xs:text-sm">
-            {error}
-          </div>
-        )}
-
-        {loading ? (
-          <p className="text-gray-600 text-sm">Loading members...</p>
-        ) : members.length === 0 ? (
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
-            <p className="text-gray-600 text-xs xs:text-sm">No members yet.</p>
-          </div>
-        ) : (
-          <div className="bg-white rounded-lg shadow overflow-x-auto">
-            <table className="w-full text-xs sm:text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-3 sm:px-6 py-2 sm:py-3 text-left font-semibold text-gray-900">Name</th>
-                  <th className="px-3 sm:px-6 py-2 sm:py-3 text-left font-semibold text-gray-900">Email</th>
-                  <th className="px-3 sm:px-6 py-2 sm:py-3 text-left font-semibold text-gray-900">Role</th>
-                  {isAdmin && <th className="px-3 sm:px-6 py-2 sm:py-3 text-left font-semibold text-gray-900">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {members.map((member) => (
-                  <tr key={member.user_id} className="hover:bg-gray-50">
-                    <td className="px-3 sm:px-6 py-2 sm:py-3 text-gray-900 font-medium">{member.name || '—'}</td>
-                    <td className="px-3 sm:px-6 py-2 sm:py-3 text-gray-700 break-all">{member.email}</td>
-                    <td className="px-3 sm:px-6 py-2 sm:py-3">
-                      {isAdmin && member.user_id !== user?.id ? (
-                        <select
-                          value={member.role}
-                          onChange={(e) => handleUpdateRole(member.user_id, e.target.value)}
-                          disabled={roleChanging === member.user_id}
-                          className="px-2 py-1 text-xs border border-gray-300 rounded bg-white disabled:bg-gray-100 cursor-pointer"
-                        >
-                          <option value="member">Member</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                      ) : (
-                        <span className={`px-2 py-1 rounded text-xs font-medium inline-block ${member.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'}`}>
-                          {member.role}
-                        </span>
-                      )}
-                    </td>
-                    {isAdmin && member.user_id !== user?.id && (
-                      <td className="px-3 sm:px-6 py-2 sm:py-3">
-                        <button
-                          onClick={() => setRemoveConfirm({ open: true, userId: member.user_id, email: member.email })}
-                          disabled={removing}
-                          className="text-red-600 hover:text-red-700 text-xs font-medium disabled:text-gray-400 transition"
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <Button
+          onClick={() => setInviteOpen(true)}
+          disabled={!canManage}
+          title={canManage ? '' : 'Admin only'}
+        >
+          <UserPlus className="h-4 w-4" />
+          Invite Member
+        </Button>
       </div>
 
-      {/* Invite Modal */}
-      {showInviteModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-lg p-6 max-w-sm mx-4">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Invite Member</h2>
-            <form onSubmit={handleInviteMember} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  disabled={inviting}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                  placeholder="user@example.com"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value)}
-                  disabled={inviting}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                >
-                  <option value="member">Member</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </div>
-              {inviteError && <p className="text-red-600 text-xs">{inviteError}</p>}
-              <div className="flex gap-3 justify-end pt-2">
-                <button
+      <Card>{renderContent()}</Card>
+
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invite Member</DialogTitle>
+            <DialogDescription>
+              Send an invitation to join this organization.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="invite-email" className="text-sm font-medium">
+                Email
+              </label>
+              <Input
+                id="invite-email"
+                type="email"
+                placeholder="user@company.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                disabled={inviting}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Role</p>
+              <div className="flex gap-2">
+                <Button
                   type="button"
-                  onClick={() => {
-                    setShowInviteModal(false)
-                    setInviteError('')
-                  }}
+                  variant={inviteRole === 'member' ? 'default' : 'outline'}
+                  onClick={() => setInviteRole('member')}
                   disabled={inviting}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition disabled:bg-gray-100 disabled:text-gray-400"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
+                  Member
+                </Button>
+                <Button
+                  type="button"
+                  variant={inviteRole === 'admin' ? 'default' : 'outline'}
+                  onClick={() => setInviteRole('admin')}
                   disabled={inviting}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:bg-blue-400"
                 >
-                  {inviting ? 'Inviting...' : 'Invite'}
-                </button>
+                  Admin
+                </Button>
               </div>
-            </form>
+            </div>
+
+            {inviteError && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                {inviteError}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setInviteOpen(false)
+                setInviteError('')
+              }}
+              disabled={inviting}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleInvite} disabled={inviting}>
+              {inviting ? 'Inviting...' : 'Send Invite'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Remove Confirmation Dialog */}
-      <ConfirmDialog
-        open={removeConfirm.open}
-        title="Remove member?"
-        description={`They will lose access to this organization's projects.`}
-        confirmText="Remove"
-        danger={true}
-        loading={removing}
-        onConfirm={handleRemoveMember}
-        onCancel={() => setRemoveConfirm({ open: false, userId: null, email: null })}
-      />
+      <Dialog
+        open={removeDialog.open}
+        onOpenChange={(open) =>
+          !open && setRemoveDialog({ open: false, userId: '', email: '' })
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Member</DialogTitle>
+            <DialogDescription>
+              This will revoke access for <span className="font-medium">{removeDialog.email}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRemoveDialog({ open: false, userId: '', email: '' })}
+              disabled={removing}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleRemove} disabled={removing}>
+              {removing ? 'Removing...' : 'Remove'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Toast */}
-      {message.show && (
-        <Toast message={message.text} type={message.type} onClose={() => setMessage({ show: false, text: '', type: 'success' })} />
+      {toast.show && (
+        <Toast
+          message={toast.text}
+          type={toast.type}
+          onClose={() => setToast({ show: false, text: '', type: 'success' })}
+        />
       )}
-    </Container>
+    </div>
   )
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())
+}
+
+function formatDate(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+  }).format(date)
 }
 
 export default OrgMembersPage
